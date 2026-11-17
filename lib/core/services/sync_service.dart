@@ -694,6 +694,20 @@ class SyncService {
               DateTime.now().millisecondsSinceEpoch;
           final updatedAt = (h['updatedAt'] as num?)?.toInt() ?? createdAt;
 
+          // Field posisi baca tambahan untuk restore webtoon yang akurat
+          final scrollOffset = (h['scrollOffset'] as num?)?.toInt() ?? 0;
+          final pageOffset = (h['pageOffset'] as num?)?.toInt() ?? 0;
+
+          // pageHeights: Map<int, double> → encode ke JSON string untuk server
+          String pageHeightsJson = '';
+          final rawHeights = h['pageHeights'];
+          if (rawHeights is Map && rawHeights.isNotEmpty) {
+            final entries = rawHeights.entries
+                .map((e) => '"${e.key}":${e.value}')
+                .join(',');
+            pageHeightsJson = '{$entries}';
+          }
+
           return {
             'manga_id': mangaId,
             'chapter_id': chId,
@@ -704,6 +718,10 @@ class SyncService {
             'created_at': createdAt,
             'updated_at': updatedAt,
             'deleted_at': 0,
+            'scroll_offset': scrollOffset,
+            'page_offset': pageOffset,
+            'total_pages': totalPages,
+            'page_heights': pageHeightsJson,
             'manga': {
               'manga_id': mangaId,
               'title': _truncate(h['title']?.toString() ?? slug, 100),
@@ -895,14 +913,63 @@ class SyncService {
                         }
                       }
                     }
+                    // Prioritaskan total_pages dari server kalau tersedia
+                    final serverTotalPages = (h['total_pages'] as num?)?.toInt() ?? 0;
+                    if (serverTotalPages > resolvedTotalPages) {
+                      resolvedTotalPages = serverTotalPages;
+                    }
 
                     if (resolvedChapterTitle.isEmpty && resolvedChapterNumber != null && resolvedChapterNumber > 0) {
                       resolvedChapterTitle = 'Chapter $resolvedChapterNumber';
                     }
 
+                    // Baca scroll_offset dan page_offset dari server (lebih akurat dari estimasi)
+                    final serverScrollOffset = (h['scroll_offset'] as num?)?.toDouble() ?? 0.0;
+                    final serverPageOffset = (h['page_offset'] as num?)?.toDouble() ?? 0.0;
                     final exScrollOffset = (existing?['scrollOffset'] as num?)?.toDouble() ?? 0.0;
+                    final exPageOffset = (existing?['pageOffset'] as num?)?.toDouble() ?? 0.0;
+                    // Server wins kalau punya nilai > 0, fallback ke local existing
+                    final resolvedScrollOffset = serverScrollOffset > 0 ? serverScrollOffset : exScrollOffset;
+                    final resolvedPageOffset = serverPageOffset > 0 ? serverPageOffset : exPageOffset;
+
                     final exRatio = (existing?['pageOffsetRatio'] as num?)?.toDouble();
                     final resolvedRatio = (scroll > 0.0 && scroll <= 1.0) ? scroll : exRatio;
+
+                    // Decode page_heights JSON string dari server → Map<int, double>
+                    Map<int, double>? resolvedPageHeights;
+                    final serverPageHeightsStr = (h['page_heights'] as String?) ?? '';
+                    if (serverPageHeightsStr.isNotEmpty) {
+                      try {
+                        // Parse simple JSON object: {"0":1200.0,"1":980.5}
+                        final cleaned = serverPageHeightsStr.trim();
+                        if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+                          final inner = cleaned.substring(1, cleaned.length - 1);
+                          if (inner.isNotEmpty) {
+                            resolvedPageHeights = {};
+                            for (final entry in inner.split(',')) {
+                              final parts = entry.split(':');
+                              if (parts.length == 2) {
+                                final idx = int.tryParse(parts[0].replaceAll('"', '').trim());
+                                final val = double.tryParse(parts[1].trim());
+                                if (idx != null && val != null) {
+                                  resolvedPageHeights[idx] = val;
+                                }
+                              }
+                            }
+                          }
+                        }
+                      } catch (_) {}
+                    }
+                    // Fallback ke local existing pageHeights kalau server kosong
+                    if ((resolvedPageHeights == null || resolvedPageHeights.isEmpty) &&
+                        existing?['pageHeights'] is Map) {
+                      resolvedPageHeights = (existing!['pageHeights'] as Map).map(
+                        (k, v) => MapEntry(
+                          int.tryParse(k.toString()) ?? 0,
+                          (v as num).toDouble(),
+                        ),
+                      );
+                    }
 
                     await LocalStorage.saveHistory(
                       slug: slug,
@@ -914,7 +981,9 @@ class SyncService {
                       page: page,
                       totalPages: resolvedTotalPages,
                       pageOffsetRatio: resolvedRatio,
-                      scrollOffset: exScrollOffset,
+                      scrollOffset: resolvedScrollOffset,
+                      pageOffset: resolvedPageOffset,
+                      pageHeights: resolvedPageHeights,
                       percent: percent,
                       totalChapters: totalChapters > 0 ? totalChapters : null,
                       chapterNumber: resolvedChapterNumber,
