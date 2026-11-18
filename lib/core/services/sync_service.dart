@@ -1061,8 +1061,16 @@ class SyncService {
 
       if (toHeal.isEmpty) return;
 
+      // Tunggu 30 detik setelah sync selesai sebelum mulai healing,
+      // agar request detail screen dari user tidak terganggu.
+      await Future.delayed(const Duration(seconds: 30));
+
+      // Batasi maksimal 3 item per sesi healing agar tidak membanjiri source
+      // dengan request berat saat user aktif menggunakan app.
+      final limited = toHeal.take(3).toList();
+
       final parser = ParserChannel();
-      for (final item in toHeal) {
+      for (final item in limited) {
         final slug = item['slug'] as String? ?? '';
         final source = (item['source'] as String?)?.trim().isNotEmpty == true
             ? (item['source'] as String).trim()
@@ -1083,6 +1091,9 @@ class SyncService {
         } catch (_) {
           // Ignore failures gracefully in background healing
         }
+        // Jeda 2 detik antar request agar tidak flood source dan tidak
+        // mengganggu request lain yang sedang berjalan (detail screen, dll).
+        await Future.delayed(const Duration(seconds: 2));
       }
     } catch (_) {}
   }

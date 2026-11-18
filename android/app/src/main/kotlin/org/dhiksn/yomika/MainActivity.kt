@@ -43,6 +43,7 @@ class MainActivity : FlutterFragmentActivity() {
                 .replace(Regex(""";\s*wv""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""Version/\d+\.\d+\s*""", RegexOption.IGNORE_CASE), "")
             org.dhiksn.yomika.parsers.util.HttpClientConfig.defaultUserAgent = cleanUa
+            org.dhiksn.yomika.parsers.util.HttpClientConfig.cacheDir = cacheDir
             val cm = android.webkit.CookieManager.getInstance()
             cm.setAcceptCookie(true)
             cm.setCookie("https://fanfox.net", "isAdult=1; Domain=.fanfox.net; Path=/")

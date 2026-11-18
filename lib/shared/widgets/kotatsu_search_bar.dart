@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/storage/local_storage.dart';
 import '../../core/theme/in_place_predictive_back_page_transitions_builder.dart';
 import '../../features/explore/search_screen.dart';
 import '../../features/details/manga_details_screen.dart';
 import 'search_overlay_notifier.dart';
 
-/// Search bar kapsul Material 3 seragam untuk semua layar (Riwayat, Disukai, Jelajah, Umpan).
-/// Tampilan dan fungsi pencarian 100% sama di semua layar, hanya menu titik 3 (trailingMenu) yang disesuaikan.
-/// Ketika diklik, search bar bertransformasi (morph) menjadi halaman pencarian penuh dari posisi aslinya.
-class KotatsuSearchBar extends StatefulWidget {
+/// Search bar kapsul Material 3 seragam untuk semua layar.
+class KotatsuSearchBar extends StatelessWidget {
   final Widget trailingMenu;
   final String hintText;
 
@@ -18,32 +17,22 @@ class KotatsuSearchBar extends StatefulWidget {
     this.hintText = 'Cari manga',
   });
 
-  @override
-  State<KotatsuSearchBar> createState() => _KotatsuSearchBarState();
-}
-
-class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
-  final GlobalKey _searchBarKey = GlobalKey();
-
   void _openSearchView(BuildContext context) {
-    final renderBox = _searchBarKey.currentContext?.findRenderObject() as RenderBox?;
-    final screenSize = MediaQuery.sizeOf(context);
-    final anchorRect = renderBox != null && renderBox.hasSize
-        ? (renderBox.localToGlobal(Offset.zero) & renderBox.size)
-        : Rect.fromLTWH(16, MediaQuery.paddingOf(context).top + 8, screenSize.width - 32, 48);
-
-    // Simpan notifier sebelum async gap agar aman lintas async
     final notifier = SearchOverlayNotifier.of(context);
     notifier?.value = true;
 
+    final suppressKeyboard = ValueNotifier<bool>(false);
+
     Navigator.of(context).push(
-      PredictiveBackPageRoute(
-        anchorRect: anchorRect,
-        builder: (_) => const KotatsuSearchView(),
+      _SearchOverlayRoute(
+        builder: (context) => _SearchOverlayWrapper(
+          suppressKeyboard: suppressKeyboard,
+          child: KotatsuSearchView(suppressKeyboard: suppressKeyboard),
+        ),
       ),
     ).whenComplete(() {
-      // Overlay ditutup (back / submit) → nav bar slide up
       notifier?.value = false;
+      suppressKeyboard.dispose();
     });
   }
 
@@ -54,7 +43,6 @@ class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
     return Padding(
       padding: const EdgeInsets.only(left: 16, right: 16, top: 8, bottom: 4),
       child: Container(
-        key: _searchBarKey,
         height: 48,
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHigh,
@@ -83,7 +71,7 @@ class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    widget.hintText,
+                    hintText,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -92,7 +80,7 @@ class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
                     ),
                   ),
                 ),
-                widget.trailingMenu,
+                trailingMenu,
               ],
             ),
           ),
@@ -102,13 +90,130 @@ class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
   }
 }
 
-/// Tampilan layar penuh pencarian (Material 3 SearchView) yang seragam di seluruh aplikasi
+// ── Route ────────────────────────────────────────────────────────────────────
+
+/// PageRoute yang pakai Flutter's built-in PredictiveBackPageTransitionsBuilder.
+/// Menghasilkan animasi Android 14+ predictive back persis:
+/// scale 0.90, miring ke kiri/kanan sesuai swipe edge, Y shift vertikal,
+/// corner radius device.
+class _SearchOverlayRoute<T> extends PageRoute<T> {
+  final WidgetBuilder builder;
+
+  _SearchOverlayRoute({required this.builder});
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  String? get barrierLabel => null;
+
+  @override
+  bool get maintainState => true;
+
+  @override
+  bool get opaque => true;
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 300);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 250);
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) =>
+      builder(context);
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return const PredictiveBackPageTransitionsBuilder().buildTransitions(
+      this,
+      context,
+      animation,
+      secondaryAnimation,
+      child,
+    );
+  }
+}
+
+// ── Keyboard suppressor ───────────────────────────────────────────────────────
+
+/// Wrapper tipis yang hanya handle suppression keyboard saat predictive back.
+/// Tidak ada animasi sendiri — semua animasi dari _SearchOverlayRoute.
+class _SearchOverlayWrapper extends StatefulWidget {
+  final Widget child;
+  final ValueNotifier<bool> suppressKeyboard;
+
+  const _SearchOverlayWrapper({
+    required this.suppressKeyboard,
+    required this.child,
+  });
+
+  @override
+  State<_SearchOverlayWrapper> createState() => _SearchOverlayWrapperState();
+}
+
+class _SearchOverlayWrapperState extends State<_SearchOverlayWrapper>
+    with WidgetsBindingObserver {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  bool handleStartBackGesture(PredictiveBackEvent backEvent) {
+    if (!mounted) return false;
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) return false;
+    // Suppress keyboard segera saat gesture dimulai
+    widget.suppressKeyboard.value = true;
+    return false; // biarkan route handle animasi dan pop
+  }
+
+  @override
+  void handleCancelBackGesture() {
+    // Gesture dibatalkan — izinkan keyboard kembali
+    if (mounted) widget.suppressKeyboard.value = false;
+  }
+
+  @override
+  void handleCommitBackGesture() {
+    // Route akan di-pop otomatis oleh Flutter
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+// ── Search View ───────────────────────────────────────────────────────────────
+
+/// Layar penuh pencarian.
 class KotatsuSearchView extends StatefulWidget {
   final String? initialQuery;
+
+  /// Set true saat predictive back gesture aktif — field tidak akan request keyboard.
+  final ValueNotifier<bool>? suppressKeyboard;
 
   const KotatsuSearchView({
     super.key,
     this.initialQuery,
+    this.suppressKeyboard,
   });
 
   @override
@@ -121,16 +226,8 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
   List<String> _recentSearches = [];
 
   final List<String> _popularTags = const [
-    'Action',
-    'Romance',
-    'Fantasy',
-    'Manhwa',
-    'Isekai',
-    'Comedy',
-    'Drama',
-    'Adventure',
-    'Shounen',
-    'Sci-Fi',
+    'Action', 'Romance', 'Fantasy', 'Manhwa', 'Isekai',
+    'Comedy', 'Drama', 'Adventure', 'Shounen', 'Sci-Fi',
   ];
 
   @override
@@ -138,13 +235,22 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuery ?? '');
     _loadRecentSearches();
+    widget.suppressKeyboard?.addListener(_onSuppressChanged);
 
-    // Tunggu transisi morph container selesai (~300ms) sebelum memunculkan keyboard
+    // Minta keyboard setelah transisi masuk selesai
     Future.delayed(const Duration(milliseconds: 280), () {
-      if (mounted) {
+      if (mounted && widget.suppressKeyboard?.value != true) {
         _focusNode.requestFocus();
       }
     });
+  }
+
+  void _onSuppressChanged() {
+    if (widget.suppressKeyboard?.value == true) {
+      // Force-hide IME via platform channel saat gesture back dimulai
+      SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+      _focusNode.unfocus();
+    }
   }
 
   void _loadRecentSearches() {
@@ -155,6 +261,7 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
 
   @override
   void dispose() {
+    widget.suppressKeyboard?.removeListener(_onSuppressChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -163,11 +270,8 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
   void _submitSearch(String queryText) async {
     final query = queryText.trim();
     if (query.isEmpty) return;
-
     await LocalStorage.addRecentSearch(query);
-
     if (!mounted) return;
-
     _focusNode.unfocus();
     Navigator.pushReplacement(
       context,
@@ -177,36 +281,28 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
     );
   }
 
-  /// Menampilkan saran instan dari manga yang pernah dibaca / difavoritkan
   List<Map<String, dynamic>> _getLocalSuggestions(String query) {
     if (query.trim().isEmpty) return [];
     final lower = query.toLowerCase();
-
     final results = <Map<String, dynamic>>[];
     final seen = <String>{};
 
-    // Ambil dari favorit
     for (final item in LocalStorage.getFavorites()) {
       final title = (item['title'] as String? ?? '').toLowerCase();
       final slug = item['slug'] as String? ?? '';
-      if (title.contains(lower) && !seen.contains(slug)) {
-        seen.add(slug);
+      if (title.contains(lower) && seen.add(slug)) {
         results.add(item);
         if (results.length >= 6) return results;
       }
     }
-
-    // Ambil dari riwayat
     for (final item in LocalStorage.getHistory()) {
       final title = (item['title'] as String? ?? '').toLowerCase();
       final slug = item['slug'] as String? ?? '';
-      if (title.contains(lower) && !seen.contains(slug)) {
-        seen.add(slug);
+      if (title.contains(lower) && seen.add(slug)) {
         results.add(item);
         if (results.length >= 6) return results;
       }
     }
-
     return results;
   }
 
@@ -221,67 +317,67 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
       body: SafeArea(
         child: Column(
           children: [
-            // 1. Top Search Header (Material 3 Search View AppBar)
+            // Header
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surfaceContainerHigh,
-                  border: Border(
-                    bottom: BorderSide(
-                      color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
-                    ),
+                border: Border(
+                  bottom: BorderSide(
+                    color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
                   ),
                 ),
-                child: Row(
-                  children: [
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    tooltip: 'Kembali',
+                    onPressed: () {
+                      _focusNode.unfocus();
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _focusNode,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: InputDecoration(
+                        hintText: 'Cari manga...',
+                        hintStyle: TextStyle(
+                          color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                          fontSize: 15,
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      onChanged: (v) => setState(() {}),
+                      onSubmitted: _submitSearch,
+                    ),
+                  ),
+                  if (currentText.isNotEmpty)
                     IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded),
-                      tooltip: 'Kembali',
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      tooltip: 'Hapus',
                       onPressed: () {
-                        _focusNode.unfocus();
-                        Navigator.of(context).pop();
+                        _controller.clear();
+                        setState(() {});
                       },
                     ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        focusNode: _focusNode,
-                        style: const TextStyle(fontSize: 16),
-                        decoration: InputDecoration(
-                          hintText: 'Cari manga...',
-                          hintStyle: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                            fontSize: 15,
-                          ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        onChanged: (v) => setState(() {}),
-                        onSubmitted: _submitSearch,
-                      ),
-                    ),
-                    if (currentText.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                        tooltip: 'Hapus',
-                        onPressed: () {
-                          _controller.clear();
-                          setState(() {});
-                        },
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.search_rounded),
-                      tooltip: 'Cari',
-                      color: theme.colorScheme.primary,
-                      onPressed: () => _submitSearch(_controller.text),
-                    ),
-                  ],
-                ),
+                  IconButton(
+                    icon: const Icon(Icons.search_rounded),
+                    tooltip: 'Cari',
+                    color: theme.colorScheme.primary,
+                    onPressed: () => _submitSearch(_controller.text),
+                  ),
+                ],
               ),
+            ),
 
-            // 2. Horizontal Genre & Tag Populer Chips (di bawah search bar ala Kotatsu Redo)
+            // Tag chips
             SizedBox(
               height: 48,
               child: ListView.separated(
@@ -315,12 +411,11 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
               ),
             ),
 
-            // 3. Search Suggestions Content (Saran Pencarian Seragam)
+            // Suggestions
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
-                  // A. Hasil pratinjau cepat jika sedang mengetik
                   if (currentText.isNotEmpty && localMatches.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -338,7 +433,6 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
                       final slug = item['slug'] as String? ?? '';
                       final source = item['source'] as String? ?? 'shinigami';
                       final cover = item['cover'] as String?;
-
                       return ListTile(
                         leading: const Icon(Icons.menu_book_rounded, size: 20),
                         title: Text(
@@ -349,10 +443,7 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
                         ),
                         subtitle: Text(
                           source,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+                          style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                         ),
                         trailing: const Icon(Icons.north_west_rounded, size: 16),
                         onTap: () {
@@ -373,8 +464,6 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
                     }),
                     const Divider(height: 16),
                   ],
-
-                  // B. Riwayat Pencarian Terakhir (Recent Searches)
                   if (_recentSearches.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -396,10 +485,7 @@ class _KotatsuSearchViewState extends State<KotatsuSearchView> {
                             },
                             child: Text(
                               'Hapus Semua',
-                              style: TextStyle(
-                                fontSize: 11.5,
-                                color: theme.colorScheme.primary,
-                              ),
+                              style: TextStyle(fontSize: 11.5, color: theme.colorScheme.primary),
                             ),
                           ),
                         ],

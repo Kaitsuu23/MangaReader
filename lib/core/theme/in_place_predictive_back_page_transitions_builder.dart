@@ -37,6 +37,9 @@ class InPlacePredictiveBackPageTransitionsBuilder extends PageTransitionsBuilder
         PredictiveBackEvent? startBackEvent,
         PredictiveBackEvent? currentBackEvent,
       ) {
+        // Kalau ada anchorRect (search bar morph), selalu pakai MorphTransition —
+        // bahkan saat predictive back gesture aktif. Morph collapse ke search bar
+        // jauh lebih tepat daripada in-place shrink ke tengah layar.
         if (anchorRect != null) {
           return _SearchBarMorphPageTransition(
             animation: animation,

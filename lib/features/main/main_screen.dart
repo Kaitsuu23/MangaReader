@@ -46,19 +46,14 @@ class _MainScreenState extends State<MainScreen>
 
   void _onTabSelected(int index) {
     if (_currentIndex == 1 && index != 1) {
-      // Saat berpindah dari Favorit ke tab lain (misal Jelajah / Riwayat),
-      // reset tab kategori ke indeks 0 ("Semua kesukaan")
       _favoritesKey.currentState?.resetToFirstTab();
     } else if (index == 1) {
-      // Saat masuk ke Favorit atau mengetuk ulang tab Favorit,
-      // pastikan tab kategori direset ke indeks 0
       _favoritesKey.currentState?.resetToFirstTab();
     }
-    // Saat kembali ke tab Riwayat (dari tab lain), scroll ke atas
+    // Reset scroll Riwayat ke atas sebelum setState — sama persis dengan
+    // cara resetToFirstTab di FavoritesScreen (jumpTo dipanggil sebelum rebuild)
     if (index == 0 && _currentIndex != 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _historyKey.currentState?.scrollToTop();
-      });
+      _historyKey.currentState?.scrollToTop();
     }
     setState(() {
       _currentIndex = index;

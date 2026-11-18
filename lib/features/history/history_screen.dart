@@ -28,14 +28,11 @@ class HistoryScreenState extends State<HistoryScreen> {
   late bool _isGroupingEnabled;
   final ScrollController _scrollController = ScrollController();
 
-  /// Scroll ke atas. Dipanggil dari MainScreen saat user kembali ke tab Riwayat.
+  /// Reset scroll ke atas tanpa animasi — sama seperti resetToFirstTab di FavoritesScreen.
+  /// Dipanggil dari MainScreen saat user berpindah kembali ke tab Riwayat.
   void scrollToTop() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+    if (_scrollController.hasClients && _scrollController.offset > 0) {
+      _scrollController.jumpTo(0);
     }
   }
 

@@ -99,7 +99,7 @@ class _FloatingNavbarState extends State<FloatingNavbar>
       end: const Offset(0, 1.5),
     ).animate(CurvedAnimation(
       parent: _slideController,
-      curve: Curves.fastOutSlowIn,
+      curve: Curves.easeIn,
     ));
 
     widget.searchOpenNotifier?.addListener(_onSearchOpenChanged);
@@ -108,14 +108,14 @@ class _FloatingNavbarState extends State<FloatingNavbar>
   void _onSearchOpenChanged() {
     final isOpen = widget.searchOpenNotifier?.value ?? false;
     if (isOpen) {
-      // Hide: 175ms FastOutLinearIn
+      // Hide: 175ms — FastOutLinearIn (akselerasi cepat, lalu keluar linear)
       _slideController.duration = _slideHideDuration;
       _slideController.animateTo(
         1.0,
-        curve: Curves.fastOutSlowIn,
+        curve: Curves.easeIn,
       );
     } else {
-      // Show: 225ms LinearOutSlowIn
+      // Show: 225ms — LinearOutSlowIn (mulai linear, melambat di akhir)
       _slideController.duration = _slideShowDuration;
       _slideController.animateTo(
         0.0,

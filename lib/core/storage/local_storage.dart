@@ -2375,25 +2375,69 @@ class LocalStorage {
   }
 
   /// Calculates reading progress (0.0 to 1.0) for a given manga slug based on reading history.
-  static double getHistoryProgress(String slug, {String? source, String? modeId}) {
+  ///
+  /// [actualTotalChapters] — jumlah chapter aktual yang diketahui dari source saat ini.
+  /// Jika lebih besar dari totalChapters yang tersimpan di history, berarti ada chapter baru
+  /// yang belum dibaca, sehingga progress dikembalikan sebagai nilai < 1.0 meski percent = 1.0.
+  static double getHistoryProgress(
+    String slug, {
+    String? source,
+    String? modeId,
+    int? actualTotalChapters,
+  }) {
     if (slug.isEmpty) return 0.0;
     final m = modeId ?? getActiveContentModeId();
     final clean = _cleanSlug(slug);
     final src = (source != null && source.isNotEmpty) ? source.toLowerCase().trim() : null;
     final cacheKey = src != null ? '$m::$src::$clean' : '$m::$clean';
 
-    final cached = _historyProgressCache[cacheKey];
+    // Jangan pakai cache kalau actualTotalChapters diberikan — nilainya bisa beda per-caller
+    final cached = actualTotalChapters == null ? _historyProgressCache[cacheKey] : null;
     if (cached != null) return cached;
 
     final item = getHistoryItem(slug, source: source, modeId: modeId);
     if (item == null) {
-      _historyProgressCache[cacheKey] = 0.0;
+      if (actualTotalChapters == null) _historyProgressCache[cacheKey] = 0.0;
       return 0.0;
     }
     final percentVal = (item['percent'] as num?)?.toDouble();
     if (percentVal != null && percentVal > 0) {
       var p = percentVal.clamp(0.0, 1.0);
-      final totalChs = (item['totalChapters'] as num?)?.toInt() ?? 0;
+
+      // Jika ada chapter baru sejak terakhir dibaca, percent 1.0 tidak valid lagi.
+      // Cek dua sumber: actualTotalChapters dari caller, atau feed item unread.
+      final savedTotal = (item['totalChapters'] as num?)?.toInt() ?? 0;
+
+      // Sumber 1: jumlah chapter aktual dari caller
+      if (p >= 0.999 && actualTotalChapters != null &&
+          savedTotal > 0 && actualTotalChapters > savedTotal) {
+        final newCount = actualTotalChapters - savedTotal;
+        final raw = savedTotal / actualTotalChapters;
+        final adjusted = newCount >= 3
+            ? raw.clamp(0.0, 0.97)
+            : newCount >= 2
+                ? raw.clamp(0.0, 0.98)
+                : raw.clamp(0.0, 0.99);
+        return adjusted; // tidak di-cache karena bergantung actualTotalChapters
+      }
+
+      // Sumber 2: feed item unread — chapter baru sudah masuk feed tapi history masih 1.0
+      // (terjadi setelah sync restore sebelum detail screen dibuka)
+      if (p >= 0.999 && savedTotal > 0) {
+        final unread = getMangaUnreadNewChaptersCount(clean, source: src, modeId: m);
+        if (unread > 0) {
+          final raw = savedTotal / (savedTotal + unread);
+          final adjusted = unread >= 3
+              ? raw.clamp(0.0, 0.97)
+              : unread >= 2
+                  ? raw.clamp(0.0, 0.98)
+                  : raw.clamp(0.0, 0.99);
+          _historyProgressCache[cacheKey] = adjusted;
+          return adjusted;
+        }
+      }
+
+      final totalChs = savedTotal;
       final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
       if (totalChs > 0 && chNum > 0 && p < 0.999) {
         final remaining = totalChs - chNum;
@@ -2403,7 +2447,7 @@ class LocalStorage {
           p = p.clamp(0.0, 0.99);
         }
       }
-      _historyProgressCache[cacheKey] = p;
+      if (actualTotalChapters == null) _historyProgressCache[cacheKey] = p;
       return p;
     }
     final page = (item['page'] as num?)?.toInt() ?? 1;
