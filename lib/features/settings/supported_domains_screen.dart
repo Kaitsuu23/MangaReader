@@ -22,7 +22,14 @@ const List<SupportedDomainItem> kSupportedDomains = [
   SupportedDomainItem(
     sourceId: 'shinigami',
     sourceName: 'Shinigami',
-    domains: ['11.shinigami.asia', 'id.shinigami.asia', 'shinigami.moe'],
+    domains: [
+      's1.shinigami.mx',
+      'shinigami.io',
+      'shinigami.gg',
+      '11.shinigami.asia',
+      'id.shinigami.asia',
+      'shinigami.moe',
+    ],
   ),
   SupportedDomainItem(
     sourceId: 'softkomik',

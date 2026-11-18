@@ -3,6 +3,7 @@ import '../../core/storage/local_storage.dart';
 import '../../core/theme/in_place_predictive_back_page_transitions_builder.dart';
 import '../../features/explore/search_screen.dart';
 import '../../features/details/manga_details_screen.dart';
+import 'search_overlay_notifier.dart';
 
 /// Search bar kapsul Material 3 seragam untuk semua layar (Riwayat, Disukai, Jelajah, Umpan).
 /// Tampilan dan fungsi pencarian 100% sama di semua layar, hanya menu titik 3 (trailingMenu) yang disesuaikan.
@@ -31,12 +32,19 @@ class _KotatsuSearchBarState extends State<KotatsuSearchBar> {
         ? (renderBox.localToGlobal(Offset.zero) & renderBox.size)
         : Rect.fromLTWH(16, MediaQuery.paddingOf(context).top + 8, screenSize.width - 32, 48);
 
+    // Simpan notifier sebelum async gap agar aman lintas async
+    final notifier = SearchOverlayNotifier.of(context);
+    notifier?.value = true;
+
     Navigator.of(context).push(
       PredictiveBackPageRoute(
         anchorRect: anchorRect,
         builder: (_) => const KotatsuSearchView(),
       ),
-    );
+    ).whenComplete(() {
+      // Overlay ditutup (back / submit) → nav bar slide up
+      notifier?.value = false;
+    });
   }
 
   @override

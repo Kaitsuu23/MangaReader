@@ -688,7 +688,7 @@ class TrackerNotificationManager(private val context: Context) {
                 lower.contains("komikindo") || lower.contains("linksaya") -> "https://komikindo.click/"
                 lower.contains("softdevices") || lower.contains("komik.im") -> "https://softkomik.app/"
                 lower.contains("komiku") || lower.contains("thumbnail.komiku") -> "https://komiku.org/"
-                lower.contains("shngm") || lower.contains("shinigami") -> "https://11.shinigami.asia/"
+                lower.contains("shngm") || lower.contains("shinigami") -> "https://s1.shinigami.mx/"
                 lower.contains("hwago") || lower.contains("hwg") || lower.contains("imgsvr") -> "https://01.hwago.com/"
                 lower.contains("desu") || lower.contains("doujin") -> "https://doujin.desu.xxx/"
                 lower.contains("kiryuu") -> "https://v7.kiryuu.to/"

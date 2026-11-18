@@ -540,7 +540,7 @@ class MangaSource {
   static String getBaseUrlForSource(String sourceId) {
     switch (sourceId.toLowerCase()) {
       case 'shinigami':
-        return 'https://11.shinigami.asia';
+        return 'https://s1.shinigami.mx';
       case 'softkomik':
         return 'https://softkomik.app';
       case 'kiryuu':

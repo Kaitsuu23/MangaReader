@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../core/storage/local_storage.dart';
 import '../../shared/models/chapter.dart';
 import '../../shared/widgets/floating_navbar.dart';
+import '../../shared/widgets/search_overlay_notifier.dart';
 import '../auth/pin_lock_screen.dart';
 import '../details/manga_details_screen.dart';
 import '../explore/explore_screen.dart';
@@ -28,9 +29,11 @@ class _MainScreenState extends State<MainScreen>
   bool _isLocked = false;
 
   final GlobalKey<FavoritesScreenState> _favoritesKey = GlobalKey<FavoritesScreenState>();
+  final GlobalKey<HistoryScreenState> _historyKey = GlobalKey<HistoryScreenState>();
+  final ValueNotifier<bool> _searchOpenNotifier = ValueNotifier<bool>(false);
 
   late final List<Widget> _screens = [
-    const HistoryScreen(),
+    HistoryScreen(key: _historyKey),
     FavoritesScreen(
       key: _favoritesKey,
       onExploreTap: () => _onTabSelected(2),
@@ -50,6 +53,12 @@ class _MainScreenState extends State<MainScreen>
       // Saat masuk ke Favorit atau mengetuk ulang tab Favorit,
       // pastikan tab kategori direset ke indeks 0
       _favoritesKey.currentState?.resetToFirstTab();
+    }
+    // Saat kembali ke tab Riwayat (dari tab lain), scroll ke atas
+    if (index == 0 && _currentIndex != 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _historyKey.currentState?.scrollToTop();
+      });
     }
     setState(() {
       _currentIndex = index;
@@ -251,6 +260,7 @@ class _MainScreenState extends State<MainScreen>
   void dispose() {
     NetworkService.isConnectedNotifier.removeListener(_onConnectivityChanged);
     WidgetsBinding.instance.removeObserver(this);
+    _searchOpenNotifier.dispose();
     super.dispose();
   }
 
@@ -298,7 +308,9 @@ class _MainScreenState extends State<MainScreen>
       children: _screens,
     );
 
-    return ListenableBuilder(
+    return SearchOverlayNotifier(
+      notifier: _searchOpenNotifier,
+      child: ListenableBuilder(
       listenable: Listenable.merge([
         LocalStorage.listenSettings(),
         LocalStorage.listenContentMode(),
@@ -333,6 +345,7 @@ class _MainScreenState extends State<MainScreen>
                         bottom: 0,
                         child: FloatingNavbar(
                           currentIndex: _currentIndex,
+                          searchOpenNotifier: _searchOpenNotifier,
                           items: [
                             const FloatingNavbarItem(
                               icon: Icons.history_rounded,
@@ -368,6 +381,7 @@ class _MainScreenState extends State<MainScreen>
                     : FloatingNavbar(
                         isFloating: false,
                         currentIndex: _currentIndex,
+                        searchOpenNotifier: _searchOpenNotifier,
                         items: [
                           const FloatingNavbarItem(
                             icon: Icons.history_rounded,
@@ -398,6 +412,7 @@ class _MainScreenState extends State<MainScreen>
           ),
         );
       },
+    ),
     );
   }
 }

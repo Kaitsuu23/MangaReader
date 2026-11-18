@@ -40,7 +40,7 @@ Map<String, String> refererFor(String url, {String? source}) {
       headers['Referer'] = 'https://komiku.org/';
       return headers;
     } else if (s.contains('shinigami')) {
-      headers['Referer'] = 'https://11.shinigami.asia/';
+      headers['Referer'] = 'https://s1.shinigami.mx/';
       return headers;
     } else if (s.contains('hwago')) {
       headers['Referer'] = 'https://01.hwago.com/';
@@ -146,7 +146,7 @@ Map<String, String> refererFor(String url, {String? source}) {
   } else if (u.contains('komiku') || u.contains('thumbnail.komiku')) {
     headers['Referer'] = 'https://komiku.org/';
   } else if (u.contains('shngm') || u.contains('shinigami')) {
-    headers['Referer'] = 'https://11.shinigami.asia/';
+    headers['Referer'] = 'https://s1.shinigami.mx/';
   } else if (u.contains('hwago') || u.contains('hwg') || u.contains('imgsvr')) {
     headers['Referer'] = 'https://01.hwago.com/';
   } else if (u.contains('desu') || u.contains('doujin')) {

@@ -667,7 +667,7 @@ class _AlternativesScreenState extends ConsumerState<AlternativesScreen> with Si
           targetDetails = await api.getDetails(newSource, effectiveNewSlug);
         }
 
-        if (targetDetails != null && targetDetails.chapters.isNotEmpty) {
+        if (targetDetails.chapters.isNotEmpty) {
           final sortedNew = Chapter.sortChronological(targetDetails.chapters);
 
           Chapter? matchedCh;

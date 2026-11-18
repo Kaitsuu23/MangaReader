@@ -149,10 +149,8 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
 
   // Screen orientation & Double-Page Spread (Kotatsu Redo)
   String _orientationSetting = 'system';
-  bool _isLandscape = false;
   bool _dualPageInLandscape = true;
   bool _shiftFirstPageCover = true;
-  int _currentSpreadIndex = 0;
 
   // Auto-scroll
   bool _autoScrollEnabled = false;
@@ -673,20 +671,17 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
   void _applyOrientation(String setting) {
     _orientationSetting = setting;
     if (setting == 'landscape') {
-      _isLandscape = true;
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
     } else if (setting == 'portrait') {
-      _isLandscape = false;
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
     } else {
       // 'system' or 'sensor': ikuti sensor accelerometer perangkat
-      _isLandscape = false;
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
@@ -700,13 +695,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
     _applyOrientation(setting);
     LocalStorage.setReaderOrientation(setting);
     setState(() {});
-  }
-
-  void _toggleOrientation() {
-    final nextSetting = _orientationSetting == 'portrait'
-        ? 'landscape'
-        : (_orientationSetting == 'landscape' ? 'system' : 'portrait');
-    _setOrientation(nextSetting);
   }
 
   // --- Double-Page Spread Engine (Kotatsu Redo) ---
@@ -1212,7 +1200,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
       if (_isDualPageActive) {
         final spreads = _currentSpreads;
         final spreadIdx = _spreadIndexForPage(_resumePageIndex, spreads);
-        _currentSpreadIndex = spreadIdx;
         _pageController.jumpToPage(spreadIdx);
       } else {
         _pageController.jumpToPage(_resumePageIndex);
@@ -1784,7 +1771,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
         if (_isDualPageActive) {
           final spreads = _currentSpreads;
           final spreadIdx = _spreadIndexForPage(clampedIndex, spreads);
-          _currentSpreadIndex = spreadIdx;
           _pageController.jumpToPage(spreadIdx);
         } else {
           _pageController.jumpToPage(clampedIndex);
@@ -3144,7 +3130,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom;
     final topPadding = MediaQuery.of(context).viewPadding.top;
     final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
-    _isLandscape = isLandscape;
     final totalPages = _chapterPages?.totalPages ?? 1;
 
     // Current chapter display — use position in list (1-indexed from oldest)
@@ -3995,7 +3980,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
                   _hideStatusBarNow();
                 }
                 if (isDualActive && !isVertical) {
-                  _currentSpreadIndex = index;
                   final spread = spreads[index.clamp(0, spreads.length - 1)];
                   _currentPageIndex = spread.firstIndex;
                   _currentPageNotifier.value = spread.firstIndex;
@@ -4428,7 +4412,6 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
   // Webtoon page with height measurement for accurate slider tracking
   Widget _buildWebtoonPageImage(MangaPage page, int index) {
     final isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
-    _isLandscape = isLandscape;
     return MeasuredPageWidget(
       onHeight: (h) => _onPageHeightMeasured(index, h),
       child: Center(

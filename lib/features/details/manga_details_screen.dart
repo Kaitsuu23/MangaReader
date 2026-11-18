@@ -180,7 +180,6 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     final bool isCompleted = isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
     final bool hasNewerChapters = !isCompleted &&
         lastReadChronoIndex >= 0 && lastReadChronoIndex < chronoChapters.length - 1;
-        lastReadChronoIndex >= 0 && lastReadChronoIndex < chronoChapters.length - 1;
 
     _cachedLastReadChronoIndex = lastReadChronoIndex;
     _cachedHasNewerChapters = hasNewerChapters;
@@ -216,7 +215,7 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     if (_cachedChronoChapters != null &&
         _cachedChronoChapters!.length == _details!.chapters.length &&
         _cachedReadSlugs != null &&
-        _cachedReadSlugs!.length == readChapterSlugs.length) {
+        _cachedReadSlugs == readChapterSlugs) {
       return;
     }
     final chronoChapters = Chapter.sortChronological(_details!.chapters);
@@ -560,10 +559,11 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         }
       }
 
-      // Bersihkan juga slug dari feed items manga ini jika ada
+      // Bersihkan juga slug dari feed items manga ini yang masih aktif/unread
       for (final item in feedItems) {
         if (item.mangaSlug == widget.slug &&
-            (widget.source.isEmpty || item.mangaSource == widget.source)) {
+            (widget.source.isEmpty || item.mangaSource == widget.source) &&
+            item.isNew) {
           toMarkUnread.addAll(item.newChapterSlugs);
           toMarkUnread.addAll(item.newChapters);
         }
@@ -1006,15 +1006,15 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         final effectiveId = (details?.id ?? _details?.id ?? widget.id ?? '')
             .trim();
         if (effectiveId.isNotEmpty && uuidRegex.hasMatch(effectiveId)) {
-          return 'https://11.shinigami.asia/series/$effectiveId';
+          return 'https://s1.shinigami.mx/series/$effectiveId';
         }
         if (uuidRegex.hasMatch(cleanSlug)) {
-          return 'https://11.shinigami.asia/series/$cleanSlug';
+          return 'https://s1.shinigami.mx/series/$cleanSlug';
         }
         if (effectiveId.isNotEmpty) {
-          return 'https://11.shinigami.asia/series/$effectiveId';
+          return 'https://s1.shinigami.mx/series/$effectiveId';
         }
-        return 'https://11.shinigami.asia/series/$cleanSlug';
+        return 'https://s1.shinigami.mx/series/$cleanSlug';
       case 'softkomik':
         return 'https://softkomik.app/$cleanSlug';
       case 'kiryuu':
@@ -1022,7 +1022,7 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
       case 'komiku':
         return 'https://komiku.org/manga/$cleanSlug/';
       case 'hwago':
-        return 'https://02.hwago.xyz/comic/$cleanSlug';
+        return 'https://01.hwago.com/comic/$cleanSlug';
       case 'doujindesu':
         return 'https://doujin.desu.xxx/manga/$cleanSlug';
       case 'komiktap':

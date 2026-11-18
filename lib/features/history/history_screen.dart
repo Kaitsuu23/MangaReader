@@ -19,13 +19,25 @@ class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
+  State<HistoryScreen> createState() => HistoryScreenState();
 }
 
-class _HistoryScreenState extends State<HistoryScreen> {
+class HistoryScreenState extends State<HistoryScreen> {
   final Set<String> _selectedSlugs = {};
   late String _sortOrder;
   late bool _isGroupingEnabled;
+  final ScrollController _scrollController = ScrollController();
+
+  /// Scroll ke atas. Dipanggil dari MainScreen saat user kembali ke tab Riwayat.
+  void scrollToTop() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
 
   String _itemKey(Map<String, dynamic> item) {
     final src = item['source'] as String? ?? '';
@@ -70,6 +82,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
     super.initState();
     _sortOrder = LocalStorage.getHistorySort();
     _isGroupingEnabled = LocalStorage.isHistoryGroupingEnabled();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   bool _isAllSelected(List<Map<String, dynamic>> all) {
@@ -528,7 +546,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Future<void> _transferSelected(BuildContext context) async {
-    final toTransfer = _selectedSlugs.toList();
+    if (_selectedSlugs.isEmpty) return;
+    // _selectedSlugs berisi composite key 'source::slug' — ekstrak pure slug untuk dialog
+    final toTransfer = _selectedSlugs.map((rawKey) {
+      if (rawKey.contains('::')) {
+        return rawKey.split('::').sublist(1).join('::');
+      }
+      return rawKey;
+    }).toSet().toList();
     if (toTransfer.isEmpty) return;
     final res = await showTransferMultipleMangaDialog(context, slugs: toTransfer);
     if (res == true && mounted) {
@@ -734,6 +759,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     if (!canGroup) {
       return GridView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 3,
@@ -776,6 +802,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final groupKeys = groups.keys.toList();
 
     return CustomScrollView(
+      controller: _scrollController,
       slivers: [
         for (final label in groupKeys) ...[
           SliverToBoxAdapter(
@@ -886,8 +913,7 @@ class _HistoryCard extends StatelessWidget {
       progress = 0.0;
     }
 
-    return RepaintBoundary(
-      child: InkWell(
+    return InkWell(
         onTap: onTap,
         onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(AppTheme.cardRadius),
@@ -991,7 +1017,6 @@ class _HistoryCard extends StatelessWidget {
             ),
           ],
         ),
-      ),
     );
   }
 }

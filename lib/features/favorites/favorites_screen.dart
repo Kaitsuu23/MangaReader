@@ -678,7 +678,14 @@ class FavoritesScreenState extends State<FavoritesScreen>
   }
 
   Future<void> _transferSelectedFavorites(BuildContext context) async {
-    final toTransfer = _selectedSlugs.toList();
+    if (_selectedSlugs.isEmpty) return;
+    // _selectedSlugs berisi composite key 'source::slug' — ekstrak pure slug untuk dialog
+    final toTransfer = _selectedSlugs.map((rawKey) {
+      if (rawKey.contains('::')) {
+        return rawKey.split('::').sublist(1).join('::');
+      }
+      return rawKey;
+    }).toSet().toList();
     if (toTransfer.isEmpty) return;
     final res = await showTransferMultipleMangaDialog(
       context,
@@ -1418,7 +1425,13 @@ class FavoritesScreenState extends State<FavoritesScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final allCategoryTabs = _getTabs();
-    _ensureTabController(allCategoryTabs.length);
+    // Guard: jangan panggil langsung dari build — jadwalkan setelah frame selesai
+    // agar tidak trigger setState/markNeedsBuild selama fase build.
+    if (_tabController.length != (allCategoryTabs.isEmpty ? 1 : allCategoryTabs.length)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ensureTabController(allCategoryTabs.length);
+      });
+    }
 
     final isInSelection = _isSelectionMode || _selectedSlugs.isNotEmpty;
 
@@ -1561,7 +1574,11 @@ class FavoritesScreenState extends State<FavoritesScreen>
                   ]),
                   builder: (context, _) {
                     final tabs = _getTabs();
-                    _ensureTabController(tabs.length);
+                    if (_tabController.length != (tabs.isEmpty ? 1 : tabs.length)) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _ensureTabController(tabs.length);
+                      });
+                    }
                     final allFavs = LocalStorage.getFavorites();
 
                     List<Map<String, dynamic>> favsForCat(String cat) {

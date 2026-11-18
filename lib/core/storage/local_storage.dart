@@ -3229,6 +3229,11 @@ class LocalStorage {
     required String slug,
     required Set<String> readChapters,
     Map<String, dynamic>? history,
+    // Jika true, hanya cocokkan berdasarkan slug/title eksplisit di readChapters —
+    // tidak menggunakan numeric fuzzy matching atau history matching.
+    // Gunakan ini saat mengecek status chapter dari feed agar chapter baru
+    // tidak ter-anggap sudah dibaca hanya karena cocok secara numerik.
+    bool strictMode = false,
   }) {
     final cleanSlug = slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
     final cleanTitle = title.trim();
@@ -3247,6 +3252,10 @@ class LocalStorage {
         return true;
       }
     }
+
+    // Di strict mode (feed checking), tidak lakukan numeric matching atau history matching
+    // agar chapter baru tidak salah ter-mark sebagai sudah dibaca.
+    if (strictMode) return false;
 
     final chNum = _extractChapterNum(cleanTitle.isNotEmpty ? cleanTitle : cleanSlug);
     if (chNum != null) {
@@ -3294,7 +3303,6 @@ class LocalStorage {
     if (!ignoreIsNew && !item.isNew) return 0;
 
     final readChapters = getReadChapters(item.mangaSlug, source: item.mangaSource, modeId: item.modeId).toSet();
-    final history = getHistoryItem(item.mangaSlug, source: item.mangaSource, modeId: item.modeId);
 
     final chaptersToCheck = item.newChapters.isNotEmpty ? item.newChapters : item.newChapterSlugs;
     if (chaptersToCheck.isEmpty) {
@@ -3306,11 +3314,14 @@ class LocalStorage {
       final title = i < item.newChapters.length ? item.newChapters[i] : '';
       final slug = i < item.newChapterSlugs.length ? item.newChapterSlugs[i] : '';
 
+      // Gunakan strictMode=true: chapter baru di feed hanya dianggap sudah dibaca
+      // jika slugnya secara eksplisit ada di readChapters — tidak pakai numeric
+      // fuzzy matching atau history matching agar chapter baru tidak salah ter-mark read.
       final isRead = _isChapterReadMatch(
         title: title,
         slug: slug,
         readChapters: readChapters,
-        history: history,
+        strictMode: true,
       );
 
       if (!isRead) {
@@ -3364,7 +3375,6 @@ class LocalStorage {
           if (!isFeedItemUnread(item)) continue;
 
           final readChapters = getReadChapters(item.mangaSlug, source: item.mangaSource, modeId: item.modeId).toSet();
-          final history = getHistoryItem(item.mangaSlug, source: item.mangaSource, modeId: item.modeId);
           final chaptersToCheck = item.newChapters.isNotEmpty ? item.newChapters : item.newChapterSlugs;
 
           if (chaptersToCheck.isEmpty && item.isNew) {
@@ -3383,7 +3393,7 @@ class LocalStorage {
               title: title,
               slug: chSlug,
               readChapters: readChapters,
-              history: history,
+              strictMode: true,
             );
 
             if (!isRead) {
@@ -4101,6 +4111,13 @@ class LocalStorage {
       await _settingsBox.put('translator_bubble_inpaint', enabled);
 
   // --- 5. Tracker & Notification Settings ---
+
+  /// true  = belum pernah buka app (fresh install), false = sudah selesai onboarding
+  static bool isFirstLaunch() =>
+      _settingsBox.get('first_launch_done', defaultValue: false) == false;
+  static Future<void> setFirstLaunchDone() async =>
+      await _settingsBox.put('first_launch_done', true);
+
   static bool isTrackerEnabled() =>
       _settingsBox.get('tracker_enabled', defaultValue: true) as bool;
   static Future<void> setTrackerEnabled(bool enabled) async =>

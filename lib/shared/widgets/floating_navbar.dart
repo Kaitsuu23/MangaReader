@@ -29,6 +29,8 @@ class FloatingNavbar extends StatefulWidget {
   final bool showLabels;
   /// true = floating pill style, false = nempel di bawah (non-floating)
   final bool isFloating;
+  /// Notifier dari MainScreen — true saat search overlay terbuka (nav bar slide down)
+  final ValueNotifier<bool>? searchOpenNotifier;
 
   const FloatingNavbar({
     super.key,
@@ -37,6 +39,7 @@ class FloatingNavbar extends StatefulWidget {
     required this.items,
     this.showLabels = true,
     this.isFloating = true,
+    this.searchOpenNotifier,
   });
 
   @override
@@ -51,7 +54,14 @@ class _FloatingNavbarState extends State<FloatingNavbar>
 
   late List<AnimationController> _tapControllers;
 
+  // ── Search hide/show slide ─────────────────────────────────────────────────
+  late AnimationController _slideController;
+  late Animation<Offset> _slideAnimation;
+
   static const _animDuration = Duration(milliseconds: 700);
+  // Kotatsu: hide 175ms FastOutLinearIn, show 225ms LinearOutSlowIn
+  static const _slideHideDuration = Duration(milliseconds: 175);
+  static const _slideShowDuration  = Duration(milliseconds: 225);
 
   _NavItemAnimation _animTypeFor(int index) {
     switch (index) {
@@ -78,6 +88,40 @@ class _FloatingNavbarState extends State<FloatingNavbar>
       widget.items.length,
       (_) => AnimationController(vsync: this, duration: _animDuration),
     );
+
+    // Slide controller: nilai 0.0 = tampak, 1.0 = tersembunyi di bawah
+    _slideController = AnimationController(
+      vsync: this,
+      duration: _slideHideDuration,
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(0, 1.5),
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.fastOutSlowIn,
+    ));
+
+    widget.searchOpenNotifier?.addListener(_onSearchOpenChanged);
+  }
+
+  void _onSearchOpenChanged() {
+    final isOpen = widget.searchOpenNotifier?.value ?? false;
+    if (isOpen) {
+      // Hide: 175ms FastOutLinearIn
+      _slideController.duration = _slideHideDuration;
+      _slideController.animateTo(
+        1.0,
+        curve: Curves.fastOutSlowIn,
+      );
+    } else {
+      // Show: 225ms LinearOutSlowIn
+      _slideController.duration = _slideShowDuration;
+      _slideController.animateTo(
+        0.0,
+        curve: Curves.decelerate,
+      );
+    }
   }
 
   @override
@@ -88,10 +132,16 @@ class _FloatingNavbarState extends State<FloatingNavbar>
       _pillController.forward(from: 0);
       _tapControllers[widget.currentIndex].forward(from: 0);
     }
+    if (old.searchOpenNotifier != widget.searchOpenNotifier) {
+      old.searchOpenNotifier?.removeListener(_onSearchOpenChanged);
+      widget.searchOpenNotifier?.addListener(_onSearchOpenChanged);
+    }
   }
 
   @override
   void dispose() {
+    widget.searchOpenNotifier?.removeListener(_onSearchOpenChanged);
+    _slideController.dispose();
     _pillController.dispose();
     for (final c in _tapControllers) {
       c.dispose();
@@ -224,9 +274,10 @@ class _FloatingNavbarState extends State<FloatingNavbar>
       child: _buildNavContent(context, colorScheme),
     );
 
+    Widget result;
     if (widget.isFloating) {
       // Floating: ada padding, rounded, shadow
-      return SafeArea(
+      result = SafeArea(
         child: Padding(
           padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
           child: Container(
@@ -248,7 +299,7 @@ class _FloatingNavbarState extends State<FloatingNavbar>
       );
     } else {
       // Non-floating: nempel di bawah, ikut SafeArea, full-width
-      return Material(
+      result = Material(
         color: colorScheme.surfaceContainer,
         elevation: 8,
         child: SafeArea(
@@ -257,6 +308,12 @@ class _FloatingNavbarState extends State<FloatingNavbar>
         ),
       );
     }
+
+    // Bungkus dengan SlideTransition agar nav bar bisa slide down saat search terbuka
+    return SlideTransition(
+      position: _slideAnimation,
+      child: result,
+    );
   }
 
   Widget _buildNavContent(BuildContext context, ColorScheme colorScheme) {
