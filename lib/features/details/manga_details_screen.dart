@@ -177,7 +177,11 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         lastReadChronoIndex >= 0 && lastReadChronoIndex == chronoChapters.length - 1;
     final page = (historyItem?['page'] as num?)?.toInt() ?? 1;
     final totalPages = (historyItem?['totalPages'] as num?)?.toInt() ?? 1;
-    final bool isCompleted = isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
+    // Jika source punya chapter lebih banyak dari yang tersimpan di history, ada chapter baru
+    final bool hasNewChaptersSinceLastRead =
+        prevTotal != null && prevTotal > 0 && chronoChapters.length > prevTotal;
+    final bool isCompleted = !hasNewChaptersSinceLastRead &&
+        isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
     final bool hasNewerChapters = !isCompleted &&
         lastReadChronoIndex >= 0 && lastReadChronoIndex < chronoChapters.length - 1;
 
@@ -435,6 +439,8 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     }
 
     final savedPercent = (historyItem['percent'] as num?)?.toDouble() ?? 0.0;
+    final savedTotalChapters = (historyItem['totalChapters'] as num?)?.toInt() ?? 0;
+
     if (lastReadIndex == -1 && savedPercent > 0) {
       // Pakai percent untuk estimasi posisi di chapter list baru.
       // Selalu pakai chronoChapters.length (source baru) bukan prevTotal (source lama)
@@ -449,11 +455,17 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
       }
     }
 
+    // Jika chapter list di source sekarang lebih panjang dari yang tersimpan di history,
+    // berarti ada chapter baru yang belum dibaca — paksa bukan completed.
+    final bool hasNewChaptersSinceLastRead =
+        savedTotalChapters > 0 && chronoChapters.length > savedTotalChapters;
+
     final bool isLastChapter =
         (lastReadIndex >= 0 && lastReadIndex == chronoChapters.length - 1);
     final page = (historyItem['page'] as num?)?.toInt() ?? 1;
     final totalPages = (historyItem['totalPages'] as num?)?.toInt() ?? 1;
-    final bool isCompleted = isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
+    final bool isCompleted = !hasNewChaptersSinceLastRead &&
+        isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
 
     double progressPercent = 0.0;
     if (lastReadIndex >= 0) {

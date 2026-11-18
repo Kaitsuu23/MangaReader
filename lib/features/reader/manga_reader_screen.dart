@@ -488,7 +488,7 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
         final curIdx = _chapters.isNotEmpty ? _findChapterIndex(_currentChapter) : -1;
         final isLastCh = _chapters.isNotEmpty && curIdx == _chapters.length - 1;
         final histPct = (hist?['percent'] as num?)?.toDouble() ?? 0.0;
-        final isCompleted = isSameChapter && isLastCh && histPct >= 0.99;
+        final isCompleted = isSameChapter && isLastCh && histPct >= 0.999;
 
         final savedPage = isSameChapter
             ? (widget.initialPage > 0 ? widget.initialPage : (hist?['page'] as num?)?.toInt() ?? 1)
@@ -1595,7 +1595,7 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
     // Otomatis tandai bab saat ini dan seluruh bab sebelumnya sebagai sudah dibaca,
     // serta ubah bab-bab setelahnya menjadi unread jika membaca ulang bab sebelumnya (persis seperti Kotatsu)
     if (_chapters.isNotEmpty) {
-      final isCompleted = totalProgress != null && totalProgress >= 0.99;
+      final isCompleted = totalProgress != null && totalProgress >= 0.999;
       final endIdx = isCompleted ? _chapters.length : (chIdx >= 0 ? chIdx + 1 : 0);
 
       final toMarkRead = <String>[];
