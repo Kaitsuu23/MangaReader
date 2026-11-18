@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../core/services/tracker_notification_service.dart';
 import '../../core/storage/local_storage.dart';
-import '../../features/main/main_screen.dart';
-import '../../features/settings/sync_auth_screen.dart';
+import '../main/main_screen.dart';
+import '../settings/sync_auth_screen.dart';
 
 /// Layar setup pertama kali — muncul sekali saat fresh install.
 /// Menawarkan shortcut: login akun sinkronisasi, izin notifikasi, dan battery optimization.
@@ -13,14 +13,30 @@ class SetupScreen extends StatefulWidget {
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
-class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
-  // Status masing-masing item — dikosongkan true/false setelah dicek
+class _SetupScreenState extends State<SetupScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   bool? _notifGranted;
   bool? _batteryIgnored;
   bool _syncLoggedIn = false;
-
-  // Mencegah double-tap tombol "Mulai"
   bool _finishing = false;
+
+  // Scale tombol saat ditekan: 1.0 → 0.94
+  late final AnimationController _btnController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 110),
+  );
+  late final Animation<double> _btnScale = Tween<double>(begin: 1.0, end: 0.94)
+      .animate(CurvedAnimation(parent: _btnController, curve: Curves.easeInOut));
+
+  // Fade-out seluruh layar saat navigasi ke MainScreen
+  late final AnimationController _exitController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+  );
+  late final Animation<double> _exitOpacity =
+      Tween<double>(begin: 1.0, end: 0.0).animate(
+    CurvedAnimation(parent: _exitController, curve: Curves.easeIn),
+  );
 
   @override
   void initState() {
@@ -32,10 +48,11 @@ class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _btnController.dispose();
+    _exitController.dispose();
     super.dispose();
   }
 
-  /// Di-refresh saat user kembali dari Settings atau dari auth screen
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) _refreshStatus();
@@ -43,18 +60,18 @@ class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
 
   Future<void> _refreshStatus() async {
     final notif = await TrackerNotificationService.hasPermission();
-    final battery = await TrackerNotificationService.isIgnoringBatteryOptimizations();
+    final battery =
+        await TrackerNotificationService.isIgnoringBatteryOptimizations();
     final loggedIn = LocalStorage.isSyncLoggedIn();
-    if (mounted) {
-      setState(() {
-        _notifGranted = notif;
-        _batteryIgnored = battery;
-        _syncLoggedIn = loggedIn;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _notifGranted = notif;
+      _batteryIgnored = battery;
+      _syncLoggedIn = loggedIn;
+    });
   }
 
-  // ── Aksi per item ────────────────────────────────────────────────────────
+  // ── Aksi per kartu ───────────────────────────────────────────────────────
 
   Future<void> _handleNotification() async {
     if (_notifGranted == true) {
@@ -80,21 +97,51 @@ class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
     if (result == true) await _refreshStatus();
   }
 
-  // ── Navigasi ke MainScreen ───────────────────────────────────────────────
+  // ── Tombol animasi ───────────────────────────────────────────────────────
+
+  void _onTapDown(TapDownDetails _) {
+    if (!_finishing) _btnController.forward();
+  }
+
+  Future<void> _onTapUp(TapUpDetails _) async {
+    await _btnController.reverse();
+    await _finish();
+  }
+
+  Future<void> _onTapCancel() async {
+    await _btnController.reverse();
+  }
 
   Future<void> _finish() async {
     if (_finishing) return;
     setState(() => _finishing = true);
     await LocalStorage.setFirstLaunchDone();
+    // Fade out layar ini
+    await _exitController.forward();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => const MainScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) => FadeTransition(
-          opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOut),
-          child: child,
-        ),
-        transitionDuration: const Duration(milliseconds: 350),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const MainScreen(),
+        // MainScreen slide up + fade in
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final slide = Tween<Offset>(
+            begin: const Offset(0, 0.055),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+          ));
+          final fade = CurvedAnimation(
+            parent: animation,
+            curve: const Interval(0.0, 0.65, curve: Curves.easeOut),
+          );
+          return FadeTransition(
+            opacity: fade,
+            child: SlideTransition(position: slide, child: child),
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 420),
       ),
     );
   }
@@ -106,204 +153,234 @@ class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    return Scaffold(
-      backgroundColor: cs.surface,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // ── Header ────────────────────────────────────────────────────
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Ikon + judul
-                    Row(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Image.asset(
-                            'assets/icon.png',
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Selamat datang di Yomika',
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Siapkan beberapa hal sebelum mulai',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // ── Kartu Akun Sinkronisasi ────────────────────────────
-                    _SetupCard(
-                      icon: Icons.sync_rounded,
-                      iconColor: cs.primary,
-                      iconBg: cs.primaryContainer,
-                      title: 'Akun Sinkronisasi',
-                      subtitle: _syncLoggedIn
-                          ? 'Terhubung — data komik tersinkron otomatis'
-                          : 'Simpan progress baca & favorit ke cloud agar tidak hilang',
-                      statusIcon: _syncLoggedIn
-                          ? Icons.check_circle_rounded
-                          : Icons.arrow_forward_ios_rounded,
-                      statusColor: _syncLoggedIn ? Colors.green : cs.onSurfaceVariant,
-                      statusSize: _syncLoggedIn ? 22 : 16,
-                      badgeLabel: _syncLoggedIn ? null : 'Opsional',
-                      onTap: _syncLoggedIn ? null : _handleSync,
-                      enabled: !_syncLoggedIn,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ── Kartu Notifikasi ────────────────────────────────────
-                    _SetupCard(
-                      icon: Icons.notifications_active_rounded,
-                      iconColor: cs.secondary,
-                      iconBg: cs.secondaryContainer,
-                      title: 'Notifikasi Bab Baru',
-                      subtitle: _notifGranted == null
-                          ? 'Memeriksa izin...'
-                          : _notifGranted!
-                              ? 'Izin diberikan — Anda akan diberitahu saat bab baru terbit'
-                              : 'Izinkan Yomika mengirim notifikasi saat bab baru tersedia',
-                      statusIcon: _notifGranted == null
-                          ? Icons.hourglass_empty_rounded
-                          : _notifGranted!
-                              ? Icons.check_circle_rounded
-                              : Icons.arrow_forward_ios_rounded,
-                      statusColor: _notifGranted == null
-                          ? cs.onSurfaceVariant
-                          : _notifGranted!
-                              ? Colors.green
-                              : cs.onSurfaceVariant,
-                      statusSize: _notifGranted == true ? 22 : 16,
-                      badgeLabel: 'Disarankan',
-                      badgeColor: cs.secondary,
-                      onTap: _handleNotification,
-                      enabled: true,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ── Kartu Baterai ───────────────────────────────────────
-                    _SetupCard(
-                      icon: Icons.battery_charging_full_rounded,
-                      iconColor: const Color(0xFF4CAF50),
-                      iconBg: const Color(0xFF4CAF50).withValues(alpha: 0.15),
-                      title: 'Optimasi Baterai',
-                      subtitle: _batteryIgnored == null
-                          ? 'Memeriksa izin...'
-                          : _batteryIgnored!
-                              ? 'Tanpa batasan — pelacak berjalan lancar di latar belakang'
-                              : 'Izinkan aktivitas latar belakang agar pengecekan bab baru tidak terhenti',
-                      statusIcon: _batteryIgnored == null
-                          ? Icons.hourglass_empty_rounded
-                          : _batteryIgnored!
-                              ? Icons.check_circle_rounded
-                              : Icons.warning_amber_rounded,
-                      statusColor: _batteryIgnored == null
-                          ? cs.onSurfaceVariant
-                          : _batteryIgnored!
-                              ? Colors.green
-                              : cs.error,
-                      statusSize: 22,
-                      badgeLabel: 'Disarankan',
-                      badgeColor: const Color(0xFF4CAF50),
-                      onTap: _batteryIgnored == true ? null : _handleBattery,
-                      enabled: _batteryIgnored != true,
-                    ),
-
-                    const SizedBox(height: 24),
-
-                    // Note kecil di bawah kartu
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerHigh,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+    return FadeTransition(
+      opacity: _exitOpacity,
+      child: Scaffold(
+        backgroundColor: cs.surface,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // ── Konten utama (scrollable) ────────────────────────────────
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header: icon app + judul
+                      Row(
                         children: [
-                          Icon(Icons.info_outline_rounded,
-                              size: 16, color: cs.onSurfaceVariant),
-                          const SizedBox(width: 8),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.asset(
+                              'assets/icon.png',
+                              width: 56,
+                              height: 56,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
                           Expanded(
-                            child: Text(
-                              'Semua pengaturan ini bisa diubah kapan saja dari menu Pengaturan.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                height: 1.4,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Selamat datang di Yomika',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Siapkan beberapa hal sebelum mulai',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
-            // ── Footer — Tombol Mulai ──────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-              child: FilledButton(
-                onPressed: _finishing ? null : _finish,
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                child: _finishing
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
+                      const SizedBox(height: 32),
+
+                      // Kartu: Akun Sinkronisasi
+                      _SetupCard(
+                        icon: Icons.sync_rounded,
+                        iconColor: cs.primary,
+                        iconBg: cs.primaryContainer,
+                        title: 'Akun Sinkronisasi',
+                        subtitle: _syncLoggedIn
+                            ? 'Terhubung — data komik tersinkron otomatis'
+                            : 'Simpan progress baca & favorit ke cloud agar tidak hilang',
+                        statusIcon: _syncLoggedIn
+                            ? Icons.check_circle_rounded
+                            : Icons.arrow_forward_ios_rounded,
+                        statusColor: _syncLoggedIn
+                            ? Colors.green
+                            : cs.onSurfaceVariant,
+                        statusSize: _syncLoggedIn ? 22 : 16,
+                        badgeLabel: _syncLoggedIn ? null : 'Opsional',
+                        onTap: _syncLoggedIn ? null : _handleSync,
+                        enabled: !_syncLoggedIn,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Kartu: Notifikasi
+                      _SetupCard(
+                        icon: Icons.notifications_active_rounded,
+                        iconColor: cs.secondary,
+                        iconBg: cs.secondaryContainer,
+                        title: 'Notifikasi Bab Baru',
+                        subtitle: _notifGranted == null
+                            ? 'Memeriksa izin...'
+                            : _notifGranted!
+                                ? 'Izin diberikan — Anda akan diberitahu saat bab baru terbit'
+                                : 'Izinkan Yomika mengirim notifikasi saat bab baru tersedia',
+                        statusIcon: _notifGranted == null
+                            ? Icons.hourglass_empty_rounded
+                            : _notifGranted!
+                                ? Icons.check_circle_rounded
+                                : Icons.arrow_forward_ios_rounded,
+                        statusColor: _notifGranted == null
+                            ? cs.onSurfaceVariant
+                            : _notifGranted!
+                                ? Colors.green
+                                : cs.onSurfaceVariant,
+                        statusSize: _notifGranted == true ? 22 : 16,
+                        badgeLabel: 'Disarankan',
+                        badgeColor: cs.secondary,
+                        onTap: _handleNotification,
+                        enabled: true,
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Kartu: Optimasi Baterai
+                      _SetupCard(
+                        icon: Icons.battery_charging_full_rounded,
+                        iconColor: const Color(0xFF4CAF50),
+                        iconBg:
+                            const Color(0xFF4CAF50).withValues(alpha: 0.15),
+                        title: 'Optimasi Baterai',
+                        subtitle: _batteryIgnored == null
+                            ? 'Memeriksa izin...'
+                            : _batteryIgnored!
+                                ? 'Tanpa batasan — pelacak berjalan lancar di latar belakang'
+                                : 'Izinkan aktivitas latar belakang agar pengecekan bab baru tidak terhenti',
+                        statusIcon: _batteryIgnored == null
+                            ? Icons.hourglass_empty_rounded
+                            : _batteryIgnored!
+                                ? Icons.check_circle_rounded
+                                : Icons.warning_amber_rounded,
+                        statusColor: _batteryIgnored == null
+                            ? cs.onSurfaceVariant
+                            : _batteryIgnored!
+                                ? Colors.green
+                                : cs.error,
+                        statusSize: 22,
+                        badgeLabel: 'Disarankan',
+                        badgeColor: const Color(0xFF4CAF50),
+                        onTap:
+                            _batteryIgnored == true ? null : _handleBattery,
+                        enabled: _batteryIgnored != true,
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Catatan kecil
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: cs.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                      )
-                    : const Text(
-                        'Mulai Membaca',
-                        style: TextStyle(
-                          fontSize: 15.5,
-                          fontWeight: FontWeight.bold,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline_rounded,
+                                size: 16, color: cs.onSurfaceVariant),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Semua pengaturan ini bisa diubah kapan saja dari menu Pengaturan.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ],
+
+              // ── Tombol "Mulai Membaca" ────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                child: GestureDetector(
+                  onTapDown: _finishing ? null : _onTapDown,
+                  onTapUp: _finishing ? null : _onTapUp,
+                  onTapCancel: _finishing ? null : _onTapCancel,
+                  child: AnimatedBuilder(
+                    animation: _btnScale,
+                    builder: (context, child) =>
+                        Transform.scale(scale: _btnScale.value, child: child),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: double.infinity,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: _finishing
+                            ? cs.primary.withValues(alpha: 0.7)
+                            : cs.primary,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: _finishing
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: cs.primary.withValues(alpha: 0.35),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 6),
+                                ),
+                              ],
+                      ),
+                      alignment: Alignment.center,
+                      child: _finishing
+                          ? SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: cs.onPrimary,
+                              ),
+                            )
+                          : Text(
+                              'Mulai Membaca',
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.bold,
+                                color: cs.onPrimary,
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-// ── Komponen kartu setup ───────────────────────────────────────────────────────
+// ── Widget kartu setup ────────────────────────────────────────────────────────
 
 class _SetupCard extends StatelessWidget {
   final IconData icon;
