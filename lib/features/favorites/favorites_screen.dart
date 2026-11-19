@@ -37,8 +37,8 @@ class FavoritesScreenState extends State<FavoritesScreen>
       'added_desc'; // 'added_desc', 'added_asc', 'title_asc', 'title_desc'
 
   // Selection mode state matching HistoryScreen
-  bool _isSelectionMode = false;
   final Set<String> _selectedSlugs = {};
+  bool _filterUnread = false;
 
   // Scroll controllers keyed by tab index
   final Map<int, ScrollController> _scrollControllers = {};
@@ -206,22 +206,104 @@ class FavoritesScreenState extends State<FavoritesScreen>
         _selectedSlugs.remove(slug);
       } else {
         _selectedSlugs.add(slug);
-        _isSelectionMode = true;
       }
     });
   }
 
   void _exitSelectionMode() {
-    setState(() {
-      _selectedSlugs.clear();
-      _isSelectionMode = false;
-    });
+    if (_selectedSlugs.isNotEmpty) {
+      setState(() {
+        _selectedSlugs.clear();
+      });
+    }
+  }
+
+  bool _isItemUnread(Map<String, dynamic> item) {
+    final slug = (item['slug'] as String? ?? '').trim();
+    if (slug.isEmpty) return false;
+    final source = (item['source'] as String?)?.trim();
+    final latestChapter = item['latestChapter'] as String?;
+
+    final unread = LocalStorage.getMangaUnreadNewChaptersCount(slug, source: source);
+    if (unread > 0) return true;
+
+    final progress = LocalStorage.getHistoryProgress(
+      slug,
+      source: source,
+      latestChapter: latestChapter,
+    );
+    return progress < 0.999;
+  }
+
+  Widget _buildFilterChips(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          _buildChip(
+            label: 'Belum dibaca',
+            icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
+            selected: _filterUnread,
+            theme: theme,
+            onTap: () => setState(() => _filterUnread = !_filterUnread),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required ThemeData theme,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected
+          ? theme.colorScheme.secondaryContainer
+          : theme.colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected
+                    ? theme.colorScheme.onSecondaryContainer
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: selected
+                      ? theme.colorScheme.onSecondaryContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _filterAndSortItems(
     List<Map<String, dynamic>> rawItems,
   ) {
     var items = List<Map<String, dynamic>>.from(rawItems);
+    if (_filterUnread) {
+      items = items.where(_isItemUnread).toList();
+    }
     switch (_sortOrder) {
       case 'added_asc':
         items.sort((a, b) {
@@ -813,6 +895,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
     final progress = LocalStorage.getHistoryProgress(
       item.slug,
       source: item.source,
+      latestChapter: chapter.isNotEmpty ? chapter : item.latestChapter,
     );
     final unreadUpdates = LocalStorage.getMangaUnreadNewChaptersCount(
       item.slug,
@@ -825,7 +908,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
     return RepaintBoundary(
       child: InkWell(
         onTap: () {
-          if (_isSelectionMode || _selectedSlugs.isNotEmpty) {
+          if (_selectedSlugs.isNotEmpty) {
             _toggleSelection(selectKey);
           } else {
             _openDetails(item);
@@ -963,6 +1046,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
     final progress = LocalStorage.getHistoryProgress(
       item.slug,
       source: item.source,
+      latestChapter: chapter.isNotEmpty ? chapter : item.latestChapter,
     );
     final unreadUpdates = LocalStorage.getMangaUnreadNewChaptersCount(
       item.slug,
@@ -975,7 +1059,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
     return RepaintBoundary(
       child: InkWell(
         onTap: () {
-          if (_isSelectionMode || _selectedSlugs.isNotEmpty) {
+          if (_selectedSlugs.isNotEmpty) {
             _toggleSelection(selectKey);
           } else {
             _openDetails(item);
@@ -1162,6 +1246,53 @@ class FavoritesScreenState extends State<FavoritesScreen>
 
   Widget _buildEmptyState() {
     final theme = Theme.of(context);
+
+    if (_filterUnread) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: theme.colorScheme.primaryContainer.withValues(
+                    alpha: 0.5,
+                  ),
+                ),
+                child: Icon(
+                  Icons.filter_list_off_rounded,
+                  size: 40,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Tidak Ada Hasil',
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Semua komik di kategori ini sudah selesai dibaca.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Center(
       child: Padding(
@@ -1433,7 +1564,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
       });
     }
 
-    final isInSelection = _isSelectionMode || _selectedSlugs.isNotEmpty;
+    final isInSelection = _selectedSlugs.isNotEmpty;
 
     return PopScope(
       canPop: !isInSelection,
@@ -1465,7 +1596,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
                     );
                   },
                 )
-              else
+              else ...[
                 KotatsuSearchBar(
                   trailingMenu: PopupMenuButton<String>(
                     icon: const Icon(Icons.more_vert, size: 20),
@@ -1476,9 +1607,16 @@ class FavoritesScreenState extends State<FavoritesScreen>
                     ),
                     onSelected: (val) async {
                       if (val == 'select') {
-                        setState(() {
-                          _isSelectionMode = true;
-                        });
+                        final currentTab = allCategoryTabs.isNotEmpty
+                            ? allCategoryTabs[_tabController.index.clamp(
+                                0,
+                                allCategoryTabs.length - 1,
+                              )]
+                            : 'Semua kesukaan';
+                        final currentTabItems = LocalStorage.getFavorites(
+                          category: currentTab,
+                        );
+                        _toggleSelectAll(currentTabItems);
                       } else if (val == 'list_mode') {
                         _showListModeSheet();
                       } else if (val == 'content_mode') {
@@ -1563,6 +1701,8 @@ class FavoritesScreenState extends State<FavoritesScreen>
                     ],
                   ),
                 ),
+                _buildFilterChips(theme),
+              ],
 
               // Kotatsu Category Tabs & Content
               Expanded(
@@ -1570,6 +1710,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
                   listenable: Listenable.merge([
                     LocalStorage.listenFavorites(),
                     LocalStorage.listenHistory(),
+                    LocalStorage.listenFeed(),
                     LocalStorage.listenContentMode(),
                   ]),
                   builder: (context, _) {
@@ -1609,7 +1750,8 @@ class FavoritesScreenState extends State<FavoritesScreen>
                             fontSize: 13.5,
                           ),
                           tabs: tabs.map((cat) {
-                            final count = favsForCat(cat).length;
+                            final raw = favsForCat(cat);
+                            final count = _filterUnread ? raw.where(_isItemUnread).length : raw.length;
                             return Tab(
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -1844,6 +1986,9 @@ class FavoritesScreenState extends State<FavoritesScreen>
                                                   LocalStorage.getHistoryProgress(
                                                     slug,
                                                     source: effectiveFavSource,
+                                                    latestChapter: (data['latestChapter'] as String?)?.isNotEmpty == true
+                                                        ? data['latestChapter'] as String
+                                                        : mangaItem.latestChapter,
                                                   );
                                               final unreadUpdates =
                                                   LocalStorage.getMangaUnreadNewChaptersCount(
@@ -1857,9 +2002,7 @@ class FavoritesScreenState extends State<FavoritesScreen>
                                                 readProgress: progress,
                                                 unreadCount: unreadUpdates,
                                                 onTap: () {
-                                                  if (_isSelectionMode ||
-                                                      _selectedSlugs
-                                                          .isNotEmpty) {
+                                                  if (_selectedSlugs.isNotEmpty) {
                                                     _toggleSelection(selectKey);
                                                   } else {
                                                     _openDetails(mangaItem);

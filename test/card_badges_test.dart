@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:manga_app/core/storage/local_storage.dart';
 import 'package:manga_app/shared/models/manga_item.dart';
 import 'package:manga_app/shared/models/feed_item.dart';
@@ -14,6 +15,7 @@ void main() {
   late Directory tempDir;
 
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     tempDir = await Directory.systemTemp.createTemp('badges_test_');
     await LocalStorage.init(tempDir.path);
   });
@@ -166,20 +168,20 @@ void main() {
         source: 'softkomik',
       );
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 150,
-              height: 250,
-              child: MangaCard(
-                item: item,
-                onTap: () {},
-              ),
+      Widget buildCard() => MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 150,
+            height: 250,
+            child: MangaCard(
+              item: item,
+              onTap: () {},
             ),
           ),
         ),
       );
+
+      await tester.pumpWidget(buildCard());
 
       // Initially, neither badge exists
       expect(find.byType(FavoriteBadge), findsNothing);
@@ -195,7 +197,7 @@ void main() {
         );
       });
 
-      await tester.pump();
+      await tester.pumpWidget(buildCard());
 
       // Favorite badge now appears!
       expect(find.byType(FavoriteBadge), findsOneWidget);
@@ -215,7 +217,7 @@ void main() {
         );
       });
 
-      await tester.pump();
+      await tester.pumpWidget(buildCard());
 
       // Both badges now appear simultaneously!
       expect(find.byType(FavoriteBadge), findsOneWidget);
@@ -300,20 +302,20 @@ void main() {
         );
       });
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 150,
-              height: 250,
-              child: MangaCard(
-                item: item,
-                onTap: () {},
-              ),
+      Widget buildCard() => MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 150,
+            height: 250,
+            child: MangaCard(
+              item: item,
+              onTap: () {},
             ),
           ),
         ),
       );
+
+      await tester.pumpWidget(buildCard());
 
       // Favorite and reading progress are visible, +1 is NOT visible yet
       expect(find.byType(FavoriteBadge), findsOneWidget);
@@ -336,7 +338,7 @@ void main() {
         ));
       });
 
-      await tester.pump();
+      await tester.pumpWidget(buildCard());
 
       // Now +1 indicator appears alongside FavoriteBadge and ReadingProgressBadge!
       expect(find.byType(NewChaptersBadge), findsOneWidget);
@@ -354,13 +356,133 @@ void main() {
         );
       });
 
-      await tester.pump();
+      await tester.pumpWidget(buildCard());
 
       // +1 badge disappears, favorite badge remains alone at the left corner!
       expect(find.byType(NewChaptersBadge), findsNothing);
       expect(find.text('+1'), findsNothing);
       expect(find.byType(FavoriteBadge), findsOneWidget);
       expect(find.byType(ReadingProgressBadge), findsOneWidget);
+    });
+
+    testWidgets('MangaCard shows percentage and NOT 100% checkmark when new chapter is released after previous completion', (tester) async {
+      await tester.runAsync(() async {
+        // Previously completed at chapter 27 of 27
+        await LocalStorage.saveHistory(
+          slug: 'teto-x-egen',
+          title: 'Teto X Egen',
+          cover: null,
+          source: 'shinigami',
+          chapterSlug: 'chapter-27',
+          chapterTitle: 'Chapter 27',
+          chapterNumber: 27,
+          totalChapters: 27,
+          percent: 1.0,
+          page: 20,
+          totalPages: 20,
+        );
+      });
+
+      // 1. Manga in source list with latestChapter = "Chapter 28"
+      final item = MangaItem(
+        title: 'Teto X Egen',
+        slug: 'teto-x-egen',
+        source: 'shinigami',
+        latestChapter: 'Chapter 28',
+      );
+
+      final progress = LocalStorage.getHistoryProgress(
+        item.slug,
+        source: item.source,
+        latestChapter: item.latestChapter,
+      );
+      // Progress must be less than 0.999 (not 100% checkmark)
+      expect(progress < 0.999, isTrue);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 150,
+              height: 250,
+              child: MangaCard(
+                item: item,
+                onTap: () {},
+              ),
+            ),
+          ),
+        ),
+      );
+
+      // Checkmark icon must NOT be shown!
+      expect(find.byIcon(Icons.check_rounded), findsNothing);
+      // Instead, ReadingProgressBadge is shown with percentage text
+      expect(find.byType(ReadingProgressBadge), findsOneWidget);
+      expect(find.textContaining('%'), findsOneWidget);
+
+      // 2. Details screen updates history with actual dynamic percent (e.g. 0.93 for 27/28)
+      await tester.runAsync(() async {
+        await LocalStorage.updateHistoryMetadata(
+          slug: 'teto-x-egen',
+          source: 'shinigami',
+          percent: 0.93,
+          totalChapters: 28,
+          chapterNumber: 27,
+        );
+      });
+
+      // Reading progress cache must be cleared by updateHistoryMetadata
+      final updatedProgress = LocalStorage.getHistoryProgress(
+        item.slug,
+        source: item.source,
+      );
+      expect((updatedProgress - 0.93).abs() < 0.01, isTrue);
+    });
+
+    testWidgets('Feed item unread count is preserved and healed when history has lower chapter', (tester) async {
+      await tester.runAsync(() async {
+        // Save history up to chapter 53
+        await LocalStorage.saveHistory(
+          slug: 'futari-bus',
+          source: 'kiryuu',
+          title: 'Futari Bus',
+          cover: null,
+          chapterSlug: '53',
+          chapterTitle: 'Chapter 53',
+          chapterNumber: 53,
+          page: 20,
+          totalPages: 20,
+          percent: 1.0,
+          totalChapters: 53,
+        );
+
+        // Add feed item for chapter 54
+        final feedItem = FeedItem(
+          id: 'futari-bus-54',
+          mangaSlug: 'futari-bus',
+          mangaSource: 'kiryuu',
+          mangaTitle: 'Futari Bus',
+          newChapters: ['Chapter 54'],
+          newChapterSlugs: ['54'],
+          newChaptersCount: 1,
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+          isNew: true,
+        );
+        await LocalStorage.addFeedItem(feedItem);
+
+        // Even if '54' was accidentally added to readChapters by old bug:
+        await LocalStorage.markChaptersAsRead('futari-bus', ['54'], source: 'kiryuu');
+
+        // getUnreadNewChaptersCount heals it because history chapterNumber is 53 (< 54)
+        final unread = LocalStorage.getUnreadNewChaptersCount(feedItem);
+        expect(unread, equals(1));
+
+        // syncFeedItemsReadStatus keeps isNew = true
+        await LocalStorage.syncFeedItemsReadStatus(slug: 'futari-bus', source: 'kiryuu');
+        final items = LocalStorage.getFeedItems();
+        final updatedFeed = items.firstWhere((it) => it.mangaSlug == 'futari-bus');
+        expect(updatedFeed.isNew, isTrue);
+      });
     });
   });
 }

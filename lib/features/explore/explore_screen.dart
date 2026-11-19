@@ -7,6 +7,7 @@ import '../../core/storage/local_storage.dart';
 import '../../shared/widgets/empty_view.dart';
 import '../../shared/widgets/error_view.dart';
 import 'source_view_screen.dart';
+import 'favorites_by_source_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../shared/widgets/kotatsu_search_bar.dart';
 import '../content_mode/content_mode_dialog.dart';
@@ -387,7 +388,14 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                 offset: const Offset(0, 40),
                 constraints: const BoxConstraints(minWidth: 160, maxWidth: 200),
                 onSelected: (val) {
-                  if (val == 'content_mode') {
+                  if (val == 'favorites_by_source') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const FavoritesBySourceScreen(),
+                      ),
+                    );
+                  } else if (val == 'content_mode') {
                     showContentModeDialog(context, ref);
                   } else if (val == 'refresh') {
                     if (_refreshIndicatorKey.currentState != null) {
@@ -405,6 +413,17 @@ class _ExploreScreenState extends ConsumerState<ExploreScreen> {
                   }
                 },
                 itemBuilder: (ctx) => [
+                  const PopupMenuItem(
+                    value: 'favorites_by_source',
+                    height: 40,
+                    child: Row(
+                      children: [
+                        Icon(Icons.collections_bookmark_outlined, size: 18),
+                        SizedBox(width: 10),
+                        Text('Favorit per Sumber', style: TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                  ),
                   const PopupMenuItem(
                     value: 'content_mode',
                     height: 40,

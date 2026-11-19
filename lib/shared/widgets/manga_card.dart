@@ -45,7 +45,12 @@ class MangaCard extends StatelessWidget {
         : fallbackSource?.trim();
 
     final isFav = isFavorite ?? LocalStorage.isFavorite(item.slug, source: effectiveSource);
-    final progress = readProgress ?? LocalStorage.getHistoryProgress(item.slug, source: effectiveSource);
+    final progress = readProgress ??
+        LocalStorage.getHistoryProgress(
+          item.slug,
+          source: effectiveSource,
+          latestChapter: item.latestChapter,
+        );
     final unreadUpdates = unreadCount ?? LocalStorage.getMangaUnreadNewChaptersCount(item.slug, source: effectiveSource);
 
     return RepaintBoundary(

@@ -702,10 +702,10 @@ class SyncService {
           String pageHeightsJson = '';
           final rawHeights = h['pageHeights'];
           if (rawHeights is Map && rawHeights.isNotEmpty) {
-            final entries = rawHeights.entries
-                .map((e) => '"${e.key}":${e.value}')
-                .join(',');
-            pageHeightsJson = '{$entries}';
+            try {
+              final stringKeyMap = rawHeights.map((k, v) => MapEntry(k.toString(), v));
+              pageHeightsJson = jsonEncode(stringKeyMap);
+            } catch (_) {}
           }
 
           return {
@@ -940,23 +940,16 @@ class SyncService {
                     final serverPageHeightsStr = (h['page_heights'] as String?) ?? '';
                     if (serverPageHeightsStr.isNotEmpty) {
                       try {
-                        // Parse simple JSON object: {"0":1200.0,"1":980.5}
-                        final cleaned = serverPageHeightsStr.trim();
-                        if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
-                          final inner = cleaned.substring(1, cleaned.length - 1);
-                          if (inner.isNotEmpty) {
-                            resolvedPageHeights = {};
-                            for (final entry in inner.split(',')) {
-                              final parts = entry.split(':');
-                              if (parts.length == 2) {
-                                final idx = int.tryParse(parts[0].replaceAll('"', '').trim());
-                                final val = double.tryParse(parts[1].trim());
-                                if (idx != null && val != null) {
-                                  resolvedPageHeights[idx] = val;
-                                }
-                              }
+                        final decoded = jsonDecode(serverPageHeightsStr);
+                        if (decoded is Map) {
+                          resolvedPageHeights = {};
+                          decoded.forEach((k, v) {
+                            final idx = int.tryParse(k.toString());
+                            final val = (v as num?)?.toDouble();
+                            if (idx != null && val != null) {
+                              resolvedPageHeights![idx] = val;
                             }
-                          }
+                          });
                         }
                       } catch (_) {}
                     }

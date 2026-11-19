@@ -110,6 +110,9 @@ class LocalStorage {
     return slug.trim().replaceAll(RegExp(r'^/?manga/|/$'), '');
   }
 
+  static String cleanSlug(String slug) => _cleanSlug(slug);
+  static double? extractChapterNum(String text) => _extractChapterNum(text);
+
   static Future<void> _migrateContentModes() async {
     // 1. Ensure default modes exist
     if (!_settingsBox.containsKey('content_modes')) {
@@ -2211,16 +2214,6 @@ class LocalStorage {
     final cleanManga = _cleanSlug(mangaSlug);
     final src = source?.trim().toLowerCase();
     final current = getReadChapters(mangaSlug, source: src, modeId: m).toSet();
-    for (final s in unreadSlugs) {
-      final clean = s.trim();
-      if (clean.isNotEmpty) {
-        current.remove(clean);
-        final cleanTrimmed = clean.replaceAll(RegExp(r'^/+|/+$'), '');
-        if (cleanTrimmed.isNotEmpty) {
-          current.remove(cleanTrimmed);
-        }
-      }
-    }
     for (final s in readSlugs) {
       final clean = s.trim();
       if (clean.isNotEmpty) {
@@ -2228,6 +2221,16 @@ class LocalStorage {
         final cleanTrimmed = clean.replaceAll(RegExp(r'^/+|/+$'), '');
         if (cleanTrimmed.isNotEmpty) {
           current.add(cleanTrimmed);
+        }
+      }
+    }
+    for (final s in unreadSlugs) {
+      final clean = s.trim();
+      if (clean.isNotEmpty) {
+        current.remove(clean);
+        final cleanTrimmed = clean.replaceAll(RegExp(r'^/+|/+$'), '');
+        if (cleanTrimmed.isNotEmpty) {
+          current.remove(cleanTrimmed);
         }
       }
     }
@@ -2377,6 +2380,7 @@ class LocalStorage {
   /// Calculates reading progress (0.0 to 1.0) for a given manga slug based on reading history.
   ///
   /// [actualTotalChapters] — jumlah chapter aktual yang diketahui dari source saat ini.
+  /// [latestChapter] — string judul/nomor bab terbaru dari item (misal "Chapter 28").
   /// Jika lebih besar dari totalChapters yang tersimpan di history, berarti ada chapter baru
   /// yang belum dibaca, sehingga progress dikembalikan sebagai nilai < 1.0 meski percent = 1.0.
   static double getHistoryProgress(
@@ -2384,6 +2388,7 @@ class LocalStorage {
     String? source,
     String? modeId,
     int? actualTotalChapters,
+    String? latestChapter,
   }) {
     if (slug.isEmpty) return 0.0;
     final m = modeId ?? getActiveContentModeId();
@@ -2391,73 +2396,132 @@ class LocalStorage {
     final src = (source != null && source.isNotEmpty) ? source.toLowerCase().trim() : null;
     final cacheKey = src != null ? '$m::$src::$clean' : '$m::$clean';
 
-    // Jangan pakai cache kalau actualTotalChapters diberikan — nilainya bisa beda per-caller
-    final cached = actualTotalChapters == null ? _historyProgressCache[cacheKey] : null;
+    final hasCustomArgs = actualTotalChapters != null || (latestChapter != null && latestChapter.trim().isNotEmpty);
+    // Jangan pakai cache kalau caller memberikan actualTotalChapters / latestChapter khusus
+    final cached = !hasCustomArgs ? _historyProgressCache[cacheKey] : null;
     if (cached != null) return cached;
 
     final item = getHistoryItem(slug, source: source, modeId: modeId);
     if (item == null) {
-      if (actualTotalChapters == null) _historyProgressCache[cacheKey] = 0.0;
+      if (!hasCustomArgs) _historyProgressCache[cacheKey] = 0.0;
       return 0.0;
     }
+
+    final savedTotal = (item['totalChapters'] as num?)?.toInt() ?? 0;
+    final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
+
+    // Resolusi total chapter aktual: dari parameter, latestChapter, atau favorit
+    int? effectiveTotal = actualTotalChapters;
+    if (effectiveTotal == null && latestChapter != null && latestChapter.trim().isNotEmpty) {
+      final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(latestChapter);
+      if (match != null) {
+        final parsed = double.tryParse(match.group(1) ?? '');
+        if (parsed != null && parsed > 0 && parsed < 100000) {
+          effectiveTotal = parsed.toInt();
+        }
+      }
+    }
+    if (effectiveTotal == null) {
+      final fav = getFavorite(clean, source: src, modeId: m);
+      final favLatest = fav?['latestChapter'] as String?;
+      if (favLatest != null && favLatest.trim().isNotEmpty) {
+        final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(favLatest);
+        if (match != null) {
+          final parsed = double.tryParse(match.group(1) ?? '');
+          if (parsed != null && parsed > 0 && parsed < 100000) {
+            effectiveTotal = parsed.toInt();
+          }
+        }
+      }
+    }
+
     final percentVal = (item['percent'] as num?)?.toDouble();
     if (percentVal != null && percentVal > 0) {
       var p = percentVal.clamp(0.0, 1.0);
 
-      // Jika ada chapter baru sejak terakhir dibaca, percent 1.0 tidak valid lagi.
-      // Cek dua sumber: actualTotalChapters dari caller, atau feed item unread.
-      final savedTotal = (item['totalChapters'] as num?)?.toInt() ?? 0;
-
-      // Sumber 1: jumlah chapter aktual dari caller
-      if (p >= 0.999 && actualTotalChapters != null &&
-          savedTotal > 0 && actualTotalChapters > savedTotal) {
-        final newCount = actualTotalChapters - savedTotal;
-        final raw = savedTotal / actualTotalChapters;
+      // Sumber 1: effectiveTotal > savedTotal (ada chapter baru sejak terakhir dibaca)
+      if (effectiveTotal != null && savedTotal > 0 && effectiveTotal > savedTotal) {
+        final newCount = effectiveTotal - savedTotal;
+        final raw = (chNum > 0 ? chNum : savedTotal) / effectiveTotal;
         final adjusted = newCount >= 3
             ? raw.clamp(0.0, 0.97)
             : newCount >= 2
                 ? raw.clamp(0.0, 0.98)
                 : raw.clamp(0.0, 0.99);
-        return adjusted; // tidak di-cache karena bergantung actualTotalChapters
+        return adjusted; // caller-dependent, do not cache
       }
 
       // Sumber 2: feed item unread — chapter baru sudah masuk feed tapi history masih 1.0
       // (terjadi setelah sync restore sebelum detail screen dibuka)
-      if (p >= 0.999 && savedTotal > 0) {
+      if (savedTotal > 0) {
         final unread = getMangaUnreadNewChaptersCount(clean, source: src, modeId: m);
         if (unread > 0) {
-          final raw = savedTotal / (savedTotal + unread);
+          final curCh = chNum > 0 ? chNum : savedTotal;
+          final raw = curCh / (savedTotal + unread);
           final adjusted = unread >= 3
               ? raw.clamp(0.0, 0.97)
               : unread >= 2
                   ? raw.clamp(0.0, 0.98)
                   : raw.clamp(0.0, 0.99);
-          _historyProgressCache[cacheKey] = adjusted;
+          if (!hasCustomArgs) _historyProgressCache[cacheKey] = adjusted;
           return adjusted;
         }
       }
 
-      final totalChs = savedTotal;
-      final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
-      if (totalChs > 0 && chNum > 0 && p < 0.999) {
+      // Sumber 3: totalChs dan chNum dari history (atau effectiveTotal)
+      final totalChs = (effectiveTotal != null && effectiveTotal > savedTotal)
+          ? effectiveTotal
+          : savedTotal;
+      if (totalChs > 0 && chNum > 0) {
         final remaining = totalChs - chNum;
-        if (remaining >= 2) {
-          p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
-        } else {
-          p = p.clamp(0.0, 0.99);
+        if (remaining > 0) {
+          // Masih ada bab yang belum dibaca, tidak mungkin 100% (>= 0.999)
+          if (p >= 0.999) {
+            final raw = chNum / totalChs;
+            p = remaining >= 3
+                ? raw.clamp(0.0, 0.97)
+                : remaining >= 2
+                    ? raw.clamp(0.0, 0.98)
+                    : raw.clamp(0.0, 0.99);
+          } else {
+            p = remaining >= 3
+                ? p.clamp(0.0, 0.97)
+                : remaining >= 2
+                    ? p.clamp(0.0, 0.98)
+                    : p.clamp(0.0, 0.99);
+          }
         }
       }
-      if (actualTotalChapters == null) _historyProgressCache[cacheKey] = p;
+      if (!hasCustomArgs) _historyProgressCache[cacheKey] = p;
       return p;
     }
+
     final page = (item['page'] as num?)?.toInt() ?? 1;
     final totalPages = (item['totalPages'] as num?)?.toInt() ?? 1;
-    if (totalPages > 0) {
-      final p = (page / totalPages).clamp(0.01, 1.0);
-      _historyProgressCache[cacheKey] = p;
+    final totalChs = (effectiveTotal != null && effectiveTotal > savedTotal)
+        ? effectiveTotal
+        : savedTotal;
+    if (totalChs > 0 && chNum > 0) {
+      final pageFrac = totalPages > 0 ? (page / totalPages).clamp(0.0, 1.0) : 0.0;
+      final raw = ((chNum - 1 + pageFrac) / totalChs).clamp(0.01, 1.0);
+      final remaining = totalChs - chNum;
+      final p = remaining > 0
+          ? (remaining >= 3
+              ? raw.clamp(0.01, 0.97)
+              : remaining >= 2
+                  ? raw.clamp(0.01, 0.98)
+                  : raw.clamp(0.01, 0.99))
+          : raw;
+      if (!hasCustomArgs) _historyProgressCache[cacheKey] = p;
       return p;
     }
-    _historyProgressCache[cacheKey] = 0.01;
+
+    if (totalPages > 0) {
+      final p = (page / totalPages).clamp(0.01, 1.0);
+      if (!hasCustomArgs) _historyProgressCache[cacheKey] = p;
+      return p;
+    }
+    if (!hasCustomArgs) _historyProgressCache[cacheKey] = 0.01;
     return 0.01;
   }
 
@@ -2564,12 +2628,17 @@ class LocalStorage {
       'updatedAt': updatedAt ?? DateTime.now().millisecondsSinceEpoch,
     };
     double? resolvedPercent = percent;
-    if (resolvedPercent != null && totalChapters != null && chapterNumber != null && resolvedPercent < 0.999) {
+    if (resolvedPercent != null && totalChapters != null && chapterNumber != null) {
       final remaining = totalChapters - chapterNumber;
-      if (remaining >= 2) {
-        resolvedPercent = resolvedPercent.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
-      } else {
-        resolvedPercent = resolvedPercent.clamp(0.0, 0.99);
+      if (remaining > 0) {
+        if (resolvedPercent >= 0.999) {
+          resolvedPercent = (chapterNumber / totalChapters);
+        }
+        if (remaining >= 2) {
+          resolvedPercent = resolvedPercent.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
+        } else {
+          resolvedPercent = resolvedPercent.clamp(0.0, 0.99);
+        }
       }
     }
     if (resolvedPercent != null) histData['percent'] = resolvedPercent;
@@ -2676,12 +2745,17 @@ class LocalStorage {
         var p = percent;
         final totalChs = totalChapters ?? (item['totalChapters'] as num?)?.toInt() ?? 0;
         final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
-        if (totalChs > 0 && chNum > 0 && p < 0.999) {
+        if (totalChs > 0 && chNum > 0) {
           final remaining = totalChs - chNum;
-          if (remaining >= 2) {
-            p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
-          } else {
-            p = p.clamp(0.0, 0.99);
+          if (remaining > 0) {
+            if (p >= 0.999) {
+              p = (chNum / totalChs);
+            }
+            if (remaining >= 2) {
+              p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
+            } else {
+              p = p.clamp(0.0, 0.99);
+            }
           }
         }
         if ((item['percent'] as num?)?.toDouble() != p) {
@@ -2707,6 +2781,7 @@ class LocalStorage {
       }
       if (changed) {
         await _historyBox.put(key, item);
+        _historyProgressCache.clear();
       }
     }
 
@@ -3361,12 +3436,28 @@ class LocalStorage {
       // Gunakan strictMode=true: chapter baru di feed hanya dianggap sudah dibaca
       // jika slugnya secara eksplisit ada di readChapters — tidak pakai numeric
       // fuzzy matching atau history matching agar chapter baru tidak salah ter-mark read.
-      final isRead = _isChapterReadMatch(
+      bool isRead = _isChapterReadMatch(
         title: title,
         slug: slug,
         readChapters: readChapters,
         strictMode: true,
       );
+
+      // Healing protection: jika chapter ini ter-mark read di readChapters akibat bug sinkronisasi sebelumnya,
+      // tetapi historyItem mencatat bahwa bab terakhir yang dibaca pengguna di reader lebih kecil dari bab ini,
+      // maka bab ini sejatinya belum pernah dibaca oleh user!
+      if (isRead) {
+        final hist = getHistoryItem(item.mangaSlug, source: item.mangaSource, modeId: item.modeId);
+        if (hist != null) {
+          final chNum = _extractChapterNum(title.isNotEmpty ? title : slug);
+          final histNum = (hist['chapterNumber'] as num?)?.toDouble() ??
+              _extractChapterNum(hist['chapterTitle']?.toString() ?? '') ??
+              _extractChapterNum(hist['chapterSlug']?.toString() ?? '');
+          if (chNum != null && histNum != null && chNum > histNum) {
+            isRead = false;
+          }
+        }
+      }
 
       if (!isRead) {
         unreadCount++;
@@ -3472,7 +3563,7 @@ class LocalStorage {
         final itemSrc = (raw['mangaSource'] as String?)?.trim().toLowerCase();
         final itemMode = (raw['modeId'] as String?) ?? ContentMode.defaultNormalId;
 
-        if (itemMode != m) continue;
+        if (m != 'all' && itemMode != m) continue;
         if (src != null && src.isNotEmpty && itemSrc != null && itemSrc.isNotEmpty && itemSrc != src) continue;
 
         if (itemSlug == slug || (clean.isNotEmpty && (itemClean == clean || itemSlug == clean))) {
@@ -3538,7 +3629,7 @@ class LocalStorage {
         final itemSrc = (raw['mangaSource'] as String?)?.trim().toLowerCase();
         final itemMode = (raw['modeId'] as String?) ?? ContentMode.defaultNormalId;
 
-        if (itemMode != m) continue;
+        if (m != 'all' && itemMode != m) continue;
         if (src != null && src.isNotEmpty && itemSrc != null && itemSrc.isNotEmpty && itemSrc != src) continue;
 
         if (itemSlug == mangaSlug || (clean.isNotEmpty && (itemClean == clean || itemSlug == clean))) {

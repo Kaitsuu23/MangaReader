@@ -27,6 +27,8 @@ class HistoryScreenState extends State<HistoryScreen> {
   late String _sortOrder;
   late bool _isGroupingEnabled;
   final ScrollController _scrollController = ScrollController();
+  bool _filterUnread = false;
+  bool _filterNotFavorited = false;
 
   /// Reset scroll ke atas tanpa animasi — sama seperti resetToFirstTab di FavoritesScreen.
   /// Dipanggil dari MainScreen saat user berpindah kembali ke tab Riwayat.
@@ -179,39 +181,43 @@ class HistoryScreenState extends State<HistoryScreen> {
         _sortOrder == 'progress' ||
         _sortOrder == 'unread';
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          Text(
-            '$count komik',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w500,
-              fontSize: 13,
-            ),
-          ),
-          const Spacer(),
-          if (canGroup)
-            IconButton(
-              tooltip: _isGroupingEnabled ? 'Matikan pengelompokan' : 'Kelompokkan item',
-              icon: Icon(
-                _isGroupingEnabled ? Icons.workspaces_rounded : Icons.workspaces_outlined,
-                size: 20,
-                color: _isGroupingEnabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildFilterChips(theme),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              Text(
+                '$count komik',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                ),
               ),
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.all(4),
-              constraints: const BoxConstraints(),
-              onPressed: () {
-                setState(() {
-                  _isGroupingEnabled = !_isGroupingEnabled;
-                });
-                LocalStorage.setHistoryGroupingEnabled(_isGroupingEnabled);
-              },
-            ),
-          const SizedBox(width: 8),
-          PopupMenuButton<String>(
+              const Spacer(),
+              if (canGroup)
+                IconButton(
+                  tooltip: _isGroupingEnabled ? 'Matikan pengelompokan' : 'Kelompokkan item',
+                  icon: Icon(
+                    _isGroupingEnabled ? Icons.workspaces_rounded : Icons.workspaces_outlined,
+                    size: 20,
+                    color: _isGroupingEnabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                  ),
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                  onPressed: () {
+                    setState(() {
+                      _isGroupingEnabled = !_isGroupingEnabled;
+                    });
+                    LocalStorage.setHistoryGroupingEnabled(_isGroupingEnabled);
+                  },
+                ),
+              const SizedBox(width: 8),
+              PopupMenuButton<String>(
             tooltip: 'Urutkan',
             offset: const Offset(0, 36),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -257,7 +263,130 @@ class HistoryScreenState extends State<HistoryScreen> {
           ),
         ],
       ),
+    ),
+      ],
     );
+  }
+
+  Widget _buildFilterChips(ThemeData theme) {
+    if (!_filterUnread && !_filterNotFavorited) {
+      // Show chips in non-selected state
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Row(
+          children: [
+            _buildChip(
+              label: 'Belum dibaca',
+              icon: Icons.auto_stories_outlined,
+              selected: false,
+              theme: theme,
+              onTap: () => setState(() => _filterUnread = true),
+            ),
+            const SizedBox(width: 8),
+            _buildChip(
+              label: 'Belum di favorit',
+              icon: Icons.favorite_border_rounded,
+              selected: false,
+              theme: theme,
+              onTap: () => setState(() => _filterNotFavorited = true),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          if (_filterUnread || !_filterNotFavorited) ...[
+            _buildChip(
+              label: 'Belum dibaca',
+              icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
+              selected: _filterUnread,
+              theme: theme,
+              onTap: () => setState(() => _filterUnread = !_filterUnread),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (_filterNotFavorited || !_filterUnread) ...[
+            _buildChip(
+              label: 'Belum di favorit',
+              icon: _filterNotFavorited ? Icons.close : Icons.favorite_border_rounded,
+              selected: _filterNotFavorited,
+              theme: theme,
+              onTap: () => setState(() => _filterNotFavorited = !_filterNotFavorited),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required ThemeData theme,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: selected
+          ? theme.colorScheme.secondaryContainer
+          : theme.colorScheme.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: selected
+                    ? theme.colorScheme.onSecondaryContainer
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: selected
+                      ? theme.colorScheme.onSecondaryContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _applyFilters(List<Map<String, dynamic>> items) {
+    if (!_filterUnread && !_filterNotFavorited) return items;
+
+    return items.where((item) {
+      if (_filterUnread) {
+        final percentVal = (item['percent'] as num?)?.toDouble() ?? 0.0;
+        final totalChs = (item['totalChapters'] as num?)?.toInt() ?? 0;
+        final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
+        // Belum selesai: percent < 0.999 ATAU masih ada chapter tersisa
+        final isCompleted = percentVal >= 0.999 && (totalChs == 0 || chNum >= totalChs);
+        if (isCompleted) return false;
+      }
+      if (_filterNotFavorited) {
+        final slug = item['slug'] as String? ?? '';
+        final src = item['source'] as String?;
+        if (slug.isEmpty || LocalStorage.isFavorite(slug, source: src)) return false;
+      }
+      return true;
+    }).toList();
   }
 
   Map<String, List<Map<String, dynamic>>> _groupItems(List<Map<String, dynamic>> items) {
@@ -282,12 +411,17 @@ class HistoryScreenState extends State<HistoryScreen> {
         var p = percentVal.clamp(0.0, 1.0);
         final totalChs = (item['totalChapters'] as num?)?.toInt() ?? 0;
         final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
-        if (totalChs > 0 && chNum > 0 && p < 0.999) {
+        if (totalChs > 0 && chNum > 0) {
           final remaining = totalChs - chNum;
-          if (remaining >= 2) {
-            p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
-          } else {
-            p = p.clamp(0.0, 0.99);
+          if (remaining > 0) {
+            if (p >= 0.999) {
+              p = (chNum / totalChs);
+            }
+            if (remaining >= 2) {
+              p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
+            } else {
+              p = p.clamp(0.0, 0.99);
+            }
           }
         }
         pct = p;
@@ -648,6 +782,7 @@ class HistoryScreenState extends State<HistoryScreen> {
         ]),
         builder: (context, child) {
           final all = LocalStorage.getHistory(sortOrder: _sortOrder);
+          final filtered = _applyFilters(all);
           final lastRead = _mostRecentRead(all);
 
           return Scaffold(
@@ -669,7 +804,7 @@ class HistoryScreenState extends State<HistoryScreen> {
               child: Column(
                 children: [
                   if (_selectedSlugs.isNotEmpty)
-                    _buildSelectionHeader(context, all, theme)
+                    _buildSelectionHeader(context, filtered, theme)
                   else ...[
                     KotatsuSearchBar(
                       trailingMenu: PopupMenuButton<String>(
@@ -726,10 +861,10 @@ class HistoryScreenState extends State<HistoryScreen> {
                       ),
                     ),
                     if (all.isNotEmpty)
-                      _buildSubheader(context, all.length, theme),
+                      _buildSubheader(context, filtered.length, theme),
                   ],
                   Expanded(
-                    child: _buildList(context, all, theme),
+                    child: _buildList(context, filtered, theme),
                   ),
                 ],
               ),
@@ -743,10 +878,13 @@ class HistoryScreenState extends State<HistoryScreen> {
   Widget _buildList(BuildContext context, List<Map<String, dynamic>> filtered,
       ThemeData theme) {
     if (filtered.isEmpty) {
-      return const EmptyView(
-        icon: Icons.history_rounded,
-        title: 'Riwayat Kosong',
-        subtitle: 'Manga yang pernah kamu baca akan muncul di sini.',
+      final hasActiveFilter = _filterUnread || _filterNotFavorited;
+      return EmptyView(
+        icon: hasActiveFilter ? Icons.filter_list_off_rounded : Icons.history_rounded,
+        title: hasActiveFilter ? 'Tidak Ada Hasil' : 'Riwayat Kosong',
+        subtitle: hasActiveFilter
+            ? 'Tidak ada manga yang sesuai dengan filter ini.'
+            : 'Manga yang pernah kamu baca akan muncul di sini.',
       );
     }
 
@@ -895,12 +1033,17 @@ class _HistoryCard extends StatelessWidget {
       var p = percentVal.clamp(0.0, 1.0);
       final totalChs = (item['totalChapters'] as num?)?.toInt() ?? 0;
       final chNum = (item['chapterNumber'] as num?)?.toInt() ?? 0;
-      if (totalChs > 0 && chNum > 0 && p < 0.999) {
+      if (totalChs > 0 && chNum > 0) {
         final remaining = totalChs - chNum;
-        if (remaining >= 2) {
-          p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
-        } else {
-          p = p.clamp(0.0, 0.99);
+        if (remaining > 0) {
+          if (p >= 0.999) {
+            p = (chNum / totalChs);
+          }
+          if (remaining >= 2) {
+            p = p.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
+          } else {
+            p = p.clamp(0.0, 0.99);
+          }
         }
       }
       progress = p;

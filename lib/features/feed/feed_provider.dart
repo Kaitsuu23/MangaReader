@@ -259,7 +259,10 @@ class FeedUpdateNotifier extends Notifier<FeedUpdateState> {
               final savedLastSlug = baseline?['lastChapterSlug'] as String? ?? '';
               final savedTotal = (baseline?['totalChapters'] as num?)?.toInt() ?? 0;
               final histPercent = (histItem?['percent'] as num?)?.toDouble() ?? 0.0;
-              final isCompleted = histPercent >= 0.999;
+              final histChNum = (histItem?['chapterNumber'] as num?)?.toInt() ?? 0;
+              final isCompleted = existingFeed.isEmpty &&
+                  histPercent >= 0.999 &&
+                  (savedTotal > 0 ? histChNum >= savedTotal : histChNum > 0);
 
               tracked[key] = {
                 'slug': slug,

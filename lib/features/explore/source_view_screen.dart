@@ -1627,7 +1627,11 @@ class _SourceViewScreenState extends ConsumerState<SourceViewScreen> {
         ? item.source!.trim()
         : widget.sourceId;
     final isFav = LocalStorage.isFavorite(item.slug, source: effectiveSource);
-    final progress = LocalStorage.getHistoryProgress(item.slug, source: effectiveSource);
+    final progress = LocalStorage.getHistoryProgress(
+      item.slug,
+      source: effectiveSource,
+      latestChapter: item.latestChapter,
+    );
     final unreadUpdates = LocalStorage.getMangaUnreadNewChaptersCount(item.slug, source: effectiveSource);
 
     return InkWell(
@@ -1731,7 +1735,11 @@ class _SourceViewScreenState extends ConsumerState<SourceViewScreen> {
         ? item.source!.trim()
         : widget.sourceId;
     final isFav = LocalStorage.isFavorite(item.slug, source: effectiveSource);
-    final progress = LocalStorage.getHistoryProgress(item.slug, source: effectiveSource);
+    final progress = LocalStorage.getHistoryProgress(
+      item.slug,
+      source: effectiveSource,
+      latestChapter: item.latestChapter,
+    );
     final unreadUpdates = LocalStorage.getMangaUnreadNewChaptersCount(item.slug, source: effectiveSource);
 
     return InkWell(

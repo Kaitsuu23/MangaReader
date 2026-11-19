@@ -865,15 +865,34 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
     }
     // 3. Posisi halaman yang sedang dibaca di bagian atas layar (scrollOffset)
     else {
-      double cumulative = 0.0;
+      // Prioritas 1: Cari dari RenderBox halaman yang sedang aktif di viewport (akurasi 100% tanpa distorsi estimasi)
+      int? visibleIndex;
       for (int i = 0; i < pages.length; i++) {
-        final h = _pageHeights[i] ?? _estimatedPageHeight;
-        if (offset < cumulative + h - 1.0) {
-          newIndex = i;
+        final key = _pageKeys[i];
+        final ctx = key?.currentContext;
+        if (ctx == null) continue;
+        final box = ctx.findRenderObject();
+        if (box is! RenderBox || !box.hasSize || !box.attached || box.size.height <= 0) continue;
+        final revealOffset = RenderAbstractViewport.of(box).getOffsetToReveal(box, 0.0).offset;
+        if (offset >= revealOffset - 1.0 && offset < revealOffset + box.size.height - 1.0) {
+          visibleIndex = i;
           break;
         }
-        cumulative += h;
-        newIndex = i;
+      }
+
+      if (visibleIndex != null) {
+        newIndex = visibleIndex;
+      } else {
+        double cumulative = 0.0;
+        for (int i = 0; i < pages.length; i++) {
+          final h = _pageHeights[i] ?? _estimatedPageHeight;
+          if (offset < cumulative + h - 1.0) {
+            newIndex = i;
+            break;
+          }
+          cumulative += h;
+          newIndex = i;
+        }
       }
       newIndex = newIndex.clamp(0, pages.length - 1);
     }
@@ -1798,9 +1817,12 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
       return;
     }
 
-    final targetOffset = _offsetForPage(targetIndex);
-    _scrollController.jumpTo(targetOffset);
-    _lastKnownScrollOffset = targetOffset;
+    final existingAnchor = _applyJumpAnchor(targetIndex);
+    if (existingAnchor == null) {
+      final targetOffset = _offsetForPage(targetIndex);
+      _scrollController.jumpTo(targetOffset);
+      _lastKnownScrollOffset = targetOffset;
+    }
     _currentPageIndex = targetIndex;
     _currentPageNotifier.value = targetIndex;
 
@@ -1825,8 +1847,9 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
     if (maxExtent <= 0 && targetIndex > 0) return null;
 
     final revealOffset = RenderAbstractViewport.of(box).getOffsetToReveal(box, 0.0).offset;
-    final isLastPage = _chapterPages != null && targetIndex >= _chapterPages!.pages.length - 1;
-    final targetOffset = (isLastPage && maxExtent > 0) ? revealOffset.clamp(0.0, maxExtent) : revealOffset;
+    final targetOffset = (maxExtent > 0 && maxExtent.isFinite)
+        ? revealOffset.clamp(0.0, maxExtent)
+        : (revealOffset < 0 ? 0.0 : revealOffset);
 
     if ((_scrollController.offset - targetOffset).abs() > 0.5) {
       _scrollController.jumpTo(targetOffset);
@@ -4250,7 +4273,8 @@ class _MangaReaderScreenState extends ConsumerState<MangaReaderScreen>
           } else if (progress < 1.0) {
             _isHapticTriggeredBottom = false;
           }
-        } else {
+        } else if (pixels > 0 && maxExtent > 0 && pixels < maxExtent) {
+          // Hanya reset saat posisi scroll benar-benar berada di dalam konten (bukan di batas ujung atas/bawah)
           _accumulatedOverscrollTop = 0.0;
           _accumulatedOverscrollBottom = 0.0;
           if (_pullTopNotifier.value != 0.0) _pullTopNotifier.value = 0.0;
@@ -5024,6 +5048,17 @@ class WebtoonSmoothScrollPhysics extends ClampingScrollPhysics {
       parent: buildParent(ancestor),
       isJumpingOrResuming: isJumpingOrResuming,
     );
+  }
+
+  @override
+  double applyBoundaryConditions(ScrollMetrics position, double value) {
+    if (isJumpingOrResuming?.call() == true) {
+      if (value < position.minScrollExtent) {
+        return value - position.minScrollExtent;
+      }
+      return 0.0;
+    }
+    return super.applyBoundaryConditions(position, value);
   }
 
   @override

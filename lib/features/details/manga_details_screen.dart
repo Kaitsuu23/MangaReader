@@ -59,7 +59,7 @@ class MangaDetailsScreen extends ConsumerStatefulWidget {
 }
 
 // Cached per-chapter metadata to avoid recomputing in every build() call.
-typedef _ChapterBuildMeta = ({int chIdx, bool isExplicitlyRead});
+typedef _ChapterBuildMeta = ({int chIdx, bool isRead, bool isLastRead});
 
 class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
   MangaDetails? _details;
@@ -72,80 +72,127 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
   final ValueNotifier<double> _titleOpacity = ValueNotifier<double>(0.0);
 
   // ---- Cached computed data (invalidated on _details / readChapterSlugs change) ----
+  List<Chapter>? _sortedChronoChapters;
   List<Chapter>? _cachedChronoChapters;
   final Map<String, _ChapterBuildMeta> _chapterMetaBySlug = {};
   Set<String>? _cachedReadSlugs;
-  int _cachedLastReadChronoIndex = -1;
-  bool _cachedHasNewerChapters = false;
-  bool _cachedIsCompleted = false;
+  Map<String, dynamic>? _lastHistoryItem;
+  int _cachedReadChapterNumber = 0;
+  double _cachedProgressPercent = 0.0;
+  bool _feedUnreadLoaded = false;
+
+  final Set<String> _feedUnreadSlugs = {};
+  final Set<String> _feedUnreadTitles = {};
+  final Set<double> _feedUnreadNums = {};
+
+  void _loadFeedUnreadChapters({bool force = false}) {
+    if (_feedUnreadLoaded && !force) return;
+    _feedUnreadLoaded = true;
+
+    _feedUnreadSlugs.clear();
+    _feedUnreadTitles.clear();
+    _feedUnreadNums.clear();
+
+    final cleanWidgetSlug = LocalStorage.cleanSlug(widget.slug);
+    final normWidgetSource = widget.source.trim().toLowerCase();
+    final feedItems = LocalStorage.getFeedItems(modeId: 'all');
+
+    for (final item in feedItems) {
+      final cleanItemSlug = LocalStorage.cleanSlug(item.mangaSlug);
+      final normItemSource = item.mangaSource.trim().toLowerCase();
+      final slugMatch = cleanItemSlug == cleanWidgetSlug || item.mangaSlug == widget.slug;
+      final sourceMatch = normWidgetSource.isEmpty || normItemSource.isEmpty || normItemSource == normWidgetSource;
+
+      if (slugMatch && sourceMatch) {
+        for (final s in item.newChapterSlugs) {
+          final trimmed = s.trim();
+          if (trimmed.isNotEmpty) {
+            _feedUnreadSlugs.add(trimmed);
+            final cleanTrimmed = trimmed.replaceAll(RegExp(r'^/+|/+$'), '');
+            if (cleanTrimmed.isNotEmpty) _feedUnreadSlugs.add(cleanTrimmed);
+            _feedUnreadSlugs.add(LocalStorage.cleanSlug(trimmed));
+            _feedUnreadSlugs.add(SyncService.hashSlug(trimmed).toString());
+            final num = LocalStorage.extractChapterNum(trimmed);
+            if (num != null) _feedUnreadNums.add(num);
+          }
+        }
+        for (final t in item.newChapters) {
+          final trimmed = t.trim();
+          if (trimmed.isNotEmpty) {
+            _feedUnreadTitles.add(trimmed.toLowerCase());
+            _feedUnreadSlugs.add(trimmed);
+            _feedUnreadSlugs.add(SyncService.hashSlug(trimmed).toString());
+            final num = LocalStorage.extractChapterNum(trimmed);
+            if (num != null) _feedUnreadNums.add(num);
+          }
+        }
+      }
+    }
+  }
+
+  bool _isChapterInFeedUnread(Chapter c) {
+    if (_feedUnreadSlugs.isEmpty && _feedUnreadTitles.isEmpty && _feedUnreadNums.isEmpty) {
+      return false;
+    }
+
+    if (c.slug.isNotEmpty && _feedUnreadSlugs.contains(c.slug)) return true;
+    if (c.chapter.isNotEmpty && _feedUnreadSlugs.contains(c.chapter)) return true;
+
+    final cleanSlug = c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
+    if (cleanSlug.isNotEmpty && _feedUnreadSlugs.contains(cleanSlug)) return true;
+
+    final lastSlug = LocalStorage.cleanSlug(c.slug);
+    if (lastSlug.isNotEmpty && _feedUnreadSlugs.contains(lastSlug)) return true;
+
+    final hash = SyncService.hashSlug(c.slug).toString();
+    if (_feedUnreadSlugs.contains(hash)) return true;
+
+    final chHash = SyncService.hashSlug(c.chapter).toString();
+    if (_feedUnreadSlugs.contains(chHash)) return true;
+
+    if (_feedUnreadTitles.isNotEmpty) {
+      final trimmedTitle = c.title.trim();
+      if (_feedUnreadTitles.contains(trimmedTitle) ||
+          _feedUnreadTitles.contains(trimmedTitle.toLowerCase())) {
+        return true;
+      }
+    }
+
+    if (_feedUnreadNums.isNotEmpty) {
+      final cNum = c.chapterNumber ??
+          LocalStorage.extractChapterNum(c.title) ??
+          LocalStorage.extractChapterNum(c.slug);
+      if (cNum != null && _feedUnreadNums.any((n) => (n - cNum).abs() < 0.01)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   /// Rebuild the expensive computed data only when inputs change.
   void _rebuildCachedData(List<Chapter> chronoChapters, Set<String> readChapterSlugs,
       Map<String, dynamic>? historyItem) {
     _cachedChronoChapters = chronoChapters;
-    _cachedReadSlugs = readChapterSlugs;
+    _cachedReadSlugs = Set<String>.from(readChapterSlugs);
+
+    _loadFeedUnreadChapters();
 
     // Recompute lastReadChronoIndex
     int lastReadChronoIndex = -1;
-    final rawLastSlug = historyItem?['chapterSlug']?.toString().trim();
-    final isHashSlug =
-        rawLastSlug != null && rawLastSlug.length >= 8 && int.tryParse(rawLastSlug) != null;
-
-    if (rawLastSlug != null && rawLastSlug.isNotEmpty && chronoChapters.isNotEmpty) {
-      final cleanLast = rawLastSlug.replaceAll(RegExp(r'^/+|/+$'), '');
-      lastReadChronoIndex = chronoChapters.indexWhere((c) {
-        if (c.slug == rawLastSlug || c.chapter == rawLastSlug) return true;
-        final cleanC = c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
-        if (cleanC == cleanLast) return true;
-        if (isHashSlug) {
-          if (SyncService.hashSlug(c.slug).toString() == cleanLast ||
-              SyncService.hashSlug(c.chapter).toString() == cleanLast) {
-            return true;
-          }
-        }
-        return false;
-      });
-    }
-
-    if (lastReadChronoIndex == -1 && historyItem?['chapterTitle'] != null && chronoChapters.isNotEmpty) {
-      final chTitle = historyItem!['chapterTitle'].toString().trim().toLowerCase();
-      if (chTitle.isNotEmpty) {
-        lastReadChronoIndex = chronoChapters.indexWhere(
-          (c) => c.title.trim().toLowerCase() == chTitle,
-        );
-      }
-    }
-
-    if (lastReadChronoIndex == -1 && historyItem?['chapterNumber'] != null && chronoChapters.isNotEmpty) {
-      final chNumRaw = (historyItem!['chapterNumber'] as num);
-      final chNum = chNumRaw.toInt();
-      if (chNum > 0) {
-        // Coba exact match dengan angka asli (termasuk desimal seperti 3.5)
-        var idx = chronoChapters.indexWhere((c) => c.chapterNumber == chNumRaw);
-        // Fallback: coba integer match
-        if (idx == -1) {
-          idx = chronoChapters.indexWhere((c) => c.chapterNumber?.toInt() == chNum);
-        }
-        if (idx != -1) {
-          lastReadChronoIndex = idx;
-        } else {
-          // Cari chapter terdekat yang <= chNum
-          for (int i = chronoChapters.length - 1; i >= 0; i--) {
-            final cNum = chronoChapters[i].chapterNumber;
-            if (cNum != null && cNum <= chNum) {
-              lastReadChronoIndex = i;
-              break;
-            }
-          }
-          if (lastReadChronoIndex == -1 && chNum <= chronoChapters.length) {
-            lastReadChronoIndex = (chNum - 1).clamp(0, chronoChapters.length - 1);
-          }
+    if (historyItem != null && chronoChapters.isNotEmpty) {
+      for (int i = chronoChapters.length - 1; i >= 0; i--) {
+        if (_isChapterMatch(chronoChapters[i], historyItem)) {
+          lastReadChronoIndex = i;
+          break;
         }
       }
     }
 
     final savedPercent = (historyItem?['percent'] as num?)?.toDouble() ?? 0.0;
     final prevTotal = (historyItem?['totalChapters'] as num?)?.toInt();
+    final bool hasAnyUnreadInFeed = chronoChapters.any((c) => _isChapterInFeedUnread(c));
+
     if (lastReadChronoIndex == -1 && chronoChapters.isNotEmpty) {
       if (prevTotal != null && prevTotal > 0 && savedPercent > 0) {
         final estCh = (savedPercent * prevTotal).round();
@@ -154,12 +201,20 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         lastReadChronoIndex = (savedPercent * (chronoChapters.length - 1))
             .round()
             .clamp(0, chronoChapters.length - 1);
+      } else if (savedPercent >= 0.999) {
+        if (hasAnyUnreadInFeed || (prevTotal != null && prevTotal > 0 && chronoChapters.length > prevTotal)) {
+          final targetTotal = (prevTotal != null && prevTotal > 0) ? prevTotal : chronoChapters.length - 1;
+          lastReadChronoIndex = (targetTotal - 1).clamp(0, chronoChapters.length - 1);
+        } else {
+          lastReadChronoIndex = chronoChapters.length - 1;
+        }
       }
     }
 
     if (historyItem != null && lastReadChronoIndex == -1 && readChapterSlugs.isNotEmpty && chronoChapters.isNotEmpty) {
       for (int i = chronoChapters.length - 1; i >= 0; i--) {
         final c = chronoChapters[i];
+        if (_isChapterInFeedUnread(c)) continue;
         final cleanSlug = c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
         final hashSlug = SyncService.hashSlug(c.slug).toString();
         if (readChapterSlugs.contains(c.slug) ||
@@ -173,56 +228,127 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
       }
     }
 
+    // Pastikan lastReadChronoIndex tidak menunjuk ke chapter yang unread di feed atau setelahnya
+    if (hasAnyUnreadInFeed && lastReadChronoIndex >= 0) {
+      final firstUnreadFeedIdx = chronoChapters.indexWhere((c) => _isChapterInFeedUnread(c));
+      if (firstUnreadFeedIdx >= 0 && lastReadChronoIndex >= firstUnreadFeedIdx) {
+        lastReadChronoIndex = firstUnreadFeedIdx - 1;
+      }
+    }
+
     final bool isLastChapter =
         lastReadChronoIndex >= 0 && lastReadChronoIndex == chronoChapters.length - 1;
     final page = (historyItem?['page'] as num?)?.toInt() ?? 1;
     final totalPages = (historyItem?['totalPages'] as num?)?.toInt() ?? 1;
-    // Jika source punya chapter lebih banyak dari yang tersimpan di history, ada chapter baru
+    // Jika ada chapter unread di feed atau chapter bertambah dari total history sebelumnya, ada chapter baru
     final bool hasNewChaptersSinceLastRead =
-        prevTotal != null && prevTotal > 0 && chronoChapters.length > prevTotal;
-    final bool isCompleted = !hasNewChaptersSinceLastRead &&
+        hasAnyUnreadInFeed || (prevTotal != null && prevTotal > 0 && chronoChapters.length > prevTotal);
+    final bool isCompleted = !hasAnyUnreadInFeed && !hasNewChaptersSinceLastRead &&
         isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
     final bool hasNewerChapters = !isCompleted &&
         lastReadChronoIndex >= 0 && lastReadChronoIndex < chronoChapters.length - 1;
 
-    _cachedLastReadChronoIndex = lastReadChronoIndex;
-    _cachedHasNewerChapters = hasNewerChapters;
-    _cachedIsCompleted = isCompleted;
+    // Hitung readChapterNumber dan progressPercent untuk info header (precomputed)
+    int readChapterNumber = 0;
+    double progressPercent = 0.0;
+    if (lastReadChronoIndex >= 0) {
+      readChapterNumber = lastReadChronoIndex + 1;
+      final pageFrac = (totalPages > 0)
+          ? (page / totalPages).clamp(0.0, 1.0)
+          : 0.0;
+      if (isCompleted) {
+        progressPercent = 1.0;
+      } else {
+        final raw = (((readChapterNumber - 1) + pageFrac) / chronoChapters.length);
+        final remaining = chronoChapters.length - readChapterNumber;
+        if (remaining >= 2) {
+          progressPercent = raw.clamp(0.0, remaining >= 3 ? 0.97 : 0.98);
+        } else {
+          progressPercent = raw.clamp(0.0, 0.99);
+        }
+      }
+    } else if (savedPercent > 0) {
+      if (prevTotal != null && prevTotal > 0 && prevTotal < chronoChapters.length) {
+        readChapterNumber = (savedPercent * prevTotal).round().clamp(1, prevTotal);
+      } else if (chronoChapters.isNotEmpty) {
+        readChapterNumber = (savedPercent * chronoChapters.length).round().clamp(1, chronoChapters.length);
+      }
+      progressPercent = savedPercent.clamp(0.0, 1.0);
+    }
+    _cachedReadChapterNumber = readChapterNumber;
+    _cachedProgressPercent = progressPercent;
 
     _chapterMetaBySlug.clear();
     final hashCache = <String, String>{};
     for (int i = 0; i < chronoChapters.length; i++) {
       final ch = chronoChapters[i];
+      final isUnreadInFeed = _isChapterInFeedUnread(ch);
       final cleanSlug = ch.slug.trim().replaceAll(RegExp(r'^[/]+|[/]+$'), '');
       final hashSlug = hashCache.putIfAbsent(ch.slug, () => SyncService.hashSlug(ch.slug).toString());
-      final isExplicitlyRead =
+      final isExplicitlyRead = !isUnreadInFeed && (
           (ch.slug.isNotEmpty && readChapterSlugs.contains(ch.slug)) ||
           (cleanSlug.isNotEmpty && readChapterSlugs.contains(cleanSlug)) ||
           (ch.chapter.isNotEmpty && readChapterSlugs.contains(ch.chapter)) ||
-          (hashSlug.isNotEmpty && readChapterSlugs.contains(hashSlug));
-      final meta = (chIdx: i, isExplicitlyRead: isExplicitlyRead);
+          (hashSlug.isNotEmpty && readChapterSlugs.contains(hashSlug))
+      );
+
+      final isLastRead = !isCompleted &&
+          lastReadChronoIndex >= 0 &&
+          i == lastReadChronoIndex;
+
+      final isPreviousOrCurrent = !hasNewerChapters && isCompleted
+          ? true
+          : (lastReadChronoIndex >= 0 && i >= 0 && i <= lastReadChronoIndex);
+
+      final bool isBeyondLastRead =
+          lastReadChronoIndex >= 0 && i > lastReadChronoIndex;
+
+      final isRead = !isUnreadInFeed &&
+          !isBeyondLastRead &&
+          (isCompleted || isPreviousOrCurrent || isExplicitlyRead || isLastRead);
+
+      final meta = (chIdx: i, isRead: isRead, isLastRead: isLastRead);
       if (ch.slug.isNotEmpty) _chapterMetaBySlug[ch.slug] = meta;
       if (cleanSlug.isNotEmpty) _chapterMetaBySlug[cleanSlug] = meta;
       if (ch.chapter.isNotEmpty) _chapterMetaBySlug[ch.chapter] = meta;
     }
   }
 
+  bool _areReadSlugsEqual(Set<String>? a, Set<String> b) {
+    if (a == null) return false;
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    return a.containsAll(b);
+  }
+
+  bool _isHistoryEqual(Map<String, dynamic>? a, Map<String, dynamic>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return a['chapterSlug'] == b['chapterSlug'] &&
+        a['percent'] == b['percent'] &&
+        a['page'] == b['page'] &&
+        a['totalPages'] == b['totalPages'] &&
+        a['totalChapters'] == b['totalChapters'];
+  }
+
   void _ensureCachedData(Map<String, dynamic>? historyItem, Set<String> readChapterSlugs) {
     if (_details == null || _details!.chapters.isEmpty) {
       _cachedChronoChapters = [];
-      _cachedLastReadChronoIndex = -1;
-      _cachedHasNewerChapters = false;
-      _cachedIsCompleted = false;
+      _cachedReadChapterNumber = 0;
+      _cachedProgressPercent = 0.0;
       _chapterMetaBySlug.clear();
       return;
     }
+
+    final chronoChapters = _getChronologicalChapters();
     if (_cachedChronoChapters != null &&
-        _cachedChronoChapters!.length == _details!.chapters.length &&
-        _cachedReadSlugs != null &&
-        _cachedReadSlugs == readChapterSlugs) {
+        _cachedChronoChapters!.length == chronoChapters.length &&
+        _areReadSlugsEqual(_cachedReadSlugs, readChapterSlugs) &&
+        _isHistoryEqual(_lastHistoryItem, historyItem)) {
       return;
     }
-    final chronoChapters = Chapter.sortChronological(_details!.chapters);
+
+    _lastHistoryItem = historyItem != null ? Map<String, dynamic>.from(historyItem) : null;
     _rebuildCachedData(chronoChapters, readChapterSlugs, historyItem);
   }
 
@@ -280,7 +406,9 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
       }
       setState(() {
         _details = details;
+        _sortedChronoChapters = Chapter.sortChronological(details.chapters);
         _cachedChronoChapters = null;
+        _feedUnreadLoaded = false;
         _isLoading = false;
       });
       _syncReadChaptersWithHistory(details);
@@ -360,62 +488,13 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     final chronoChapters = _getChronologicalChapters();
     if (chronoChapters.isEmpty) return;
 
+    _loadFeedUnreadChapters();
+
     int lastReadIndex = -1;
-    final rawLastSlug = historyItem['chapterSlug']?.toString().trim();
-    final isHash =
-        rawLastSlug != null &&
-        rawLastSlug.length >= 8 &&
-        int.tryParse(rawLastSlug) != null;
-    if (rawLastSlug != null && rawLastSlug.isNotEmpty) {
-      final cleanLast = rawLastSlug.replaceAll(RegExp(r'^/+|/+$'), '');
-      lastReadIndex = chronoChapters.indexWhere((c) {
-        if (c.slug == rawLastSlug || c.chapter == rawLastSlug) return true;
-        final cleanC = c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
-        if (cleanC == cleanLast) return true;
-        if (isHash) {
-          if (SyncService.hashSlug(c.slug).toString() == cleanLast ||
-              SyncService.hashSlug(c.chapter).toString() == cleanLast) {
-            return true;
-          }
-        }
-        return false;
-      });
-    }
-
-    if (lastReadIndex == -1 && historyItem['chapterTitle'] != null) {
-      final title = historyItem['chapterTitle'].toString().trim().toLowerCase();
-      if (title.isNotEmpty) {
-        lastReadIndex = chronoChapters.indexWhere(
-          (c) => c.title.trim().toLowerCase() == title,
-        );
-      }
-    }
-
-    if (lastReadIndex == -1 && historyItem['chapterNumber'] != null) {
-      final chNumRaw = (historyItem['chapterNumber'] as num);
-      final chNum = chNumRaw.toDouble();
-      if (chNum > 0) {
-        // Coba exact match dengan angka asli (desimal 3.5 dst)
-        var idx = chronoChapters.indexWhere(
-          (c) => c.chapterNumber != null && (c.chapterNumber! - chNum).abs() < 0.01,
-        );
-        if (idx == -1) {
-          idx = chronoChapters.indexWhere(
-            (c) => c.chapterNumber?.toInt() == chNum.toInt(),
-          );
-        }
-        if (idx != -1) {
-          lastReadIndex = idx;
-        } else {
-          // Cari chapter terdekat yang <= chNum
-          for (int i = chronoChapters.length - 1; i >= 0; i--) {
-            final cNum = chronoChapters[i].chapterNumber;
-            if (cNum != null && cNum <= chNum) {
-              lastReadIndex = i;
-              break;
-            }
-          }
-        }
+    for (int i = chronoChapters.length - 1; i >= 0; i--) {
+      if (_isChapterMatch(chronoChapters[i], historyItem)) {
+        lastReadIndex = i;
+        break;
       }
     }
 
@@ -425,6 +504,7 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
       if (readSlugs.isNotEmpty) {
         for (int i = chronoChapters.length - 1; i >= 0; i--) {
           final c = chronoChapters[i];
+          if (_isChapterInFeedUnread(c)) continue;
           final cleanSlug = c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), '');
           final hashSlug = SyncService.hashSlug(c.slug).toString();
           if (readSlugs.contains(c.slug) ||
@@ -440,32 +520,42 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
 
     final savedPercent = (historyItem['percent'] as num?)?.toDouble() ?? 0.0;
     final savedTotalChapters = (historyItem['totalChapters'] as num?)?.toInt() ?? 0;
+    final bool hasAnyUnreadInFeed = chronoChapters.any((c) => _isChapterInFeedUnread(c));
 
     if (lastReadIndex == -1 && savedPercent > 0) {
-      // Pakai percent untuk estimasi posisi di chapter list baru.
-      // Selalu pakai chronoChapters.length (source baru) bukan prevTotal (source lama)
-      // agar tidak meleset setelah migrate ke source dengan jumlah chapter berbeda.
       if (savedPercent < 0.999) {
         lastReadIndex = (savedPercent * chronoChapters.length)
             .floor()
             .clamp(0, chronoChapters.length - 1);
       } else {
-        // 100% = chapter terakhir
-        lastReadIndex = chronoChapters.length - 1;
+        if (hasAnyUnreadInFeed || (savedTotalChapters > 0 && chronoChapters.length > savedTotalChapters)) {
+          final targetTotal = savedTotalChapters > 0 ? savedTotalChapters : chronoChapters.length - 1;
+          lastReadIndex = (targetTotal - 1).clamp(0, chronoChapters.length - 1);
+        } else {
+          lastReadIndex = chronoChapters.length - 1;
+        }
       }
     }
 
-    // Jika chapter list di source sekarang lebih panjang dari yang tersimpan di history,
-    // berarti ada chapter baru yang belum dibaca — paksa bukan completed.
+    // Pastikan lastReadIndex tidak pernah menunjuk ke chapter yang unread di feed atau setelahnya
+    if (hasAnyUnreadInFeed && lastReadIndex >= 0) {
+      final firstUnreadFeedIdx = chronoChapters.indexWhere((c) => _isChapterInFeedUnread(c));
+      if (firstUnreadFeedIdx >= 0 && lastReadIndex >= firstUnreadFeedIdx) {
+        lastReadIndex = firstUnreadFeedIdx - 1;
+      }
+    }
+
     final bool hasNewChaptersSinceLastRead =
-        savedTotalChapters > 0 && chronoChapters.length > savedTotalChapters;
+        hasAnyUnreadInFeed || (savedTotalChapters > 0 && chronoChapters.length > savedTotalChapters);
 
     final bool isLastChapter =
         (lastReadIndex >= 0 && lastReadIndex == chronoChapters.length - 1);
     final page = (historyItem['page'] as num?)?.toInt() ?? 1;
     final totalPages = (historyItem['totalPages'] as num?)?.toInt() ?? 1;
-    final bool isCompleted = !hasNewChaptersSinceLastRead &&
-        isLastChapter && (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
+    final bool isCompleted = !hasAnyUnreadInFeed &&
+        !hasNewChaptersSinceLastRead &&
+        isLastChapter &&
+        (savedPercent >= 0.999 || totalPages <= 1 || page >= totalPages);
 
     double progressPercent = 0.0;
     if (lastReadIndex >= 0) {
@@ -492,6 +582,8 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     final matchedChapter = lastReadIndex >= 0
         ? chronoChapters[lastReadIndex]
         : null;
+    final rawLastSlug = historyItem['chapterSlug']?.toString().trim();
+    final isHash = rawLastSlug != null && rawLastSlug.length >= 8 && int.tryParse(rawLastSlug) != null;
     final bool shouldHealHash =
         isHash && matchedChapter != null && matchedChapter.slug.isNotEmpty;
 
@@ -512,40 +604,17 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     }
 
     if (isCompleted || lastReadIndex >= 0) {
-      // Kumpulkan slug chapter yang masih unread di feed — chapter ini TIDAK boleh
-      // dimasukkan ke toMarkRead agar status "belum dibaca" di umpan tetap terjaga.
-      final feedUnreadSlugs = <String>{};
-      final feedItems = LocalStorage.getFeedItems();
-      for (final item in feedItems) {
-        if (item.mangaSlug == widget.slug &&
-            (widget.source.isEmpty || item.mangaSource == widget.source)) {
-          if (LocalStorage.isFeedItemUnread(item)) {
-            feedUnreadSlugs.addAll(item.newChapterSlugs);
-            feedUnreadSlugs.addAll(item.newChapters);
-          }
-        }
-      }
-
       final toMarkRead = <String>[];
+      final toMarkUnread = <String>[];
+
       final endIdx = isCompleted ? chronoChapters.length : lastReadIndex + 1;
       for (int i = 0; i < endIdx; i++) {
         final c = chronoChapters[i];
-        // Jangan tandai terbaca jika chapter ini masih ada di feed sebagai unread
-        final isUnreadInFeed =
-            feedUnreadSlugs.contains(c.slug) ||
-            feedUnreadSlugs.contains(c.chapter) ||
-            feedUnreadSlugs.contains(
-              c.slug.trim().replaceAll(RegExp(r'^/+|/+$'), ''),
-            ) ||
-            (c.slug.isNotEmpty &&
-                feedUnreadSlugs.contains(
-                  SyncService.hashSlug(c.slug).toString(),
-                )) ||
-            (c.chapter.isNotEmpty &&
-                feedUnreadSlugs.contains(
-                  SyncService.hashSlug(c.chapter).toString(),
-                ));
-        if (isUnreadInFeed) continue;
+        if (_isChapterInFeedUnread(c)) {
+          toMarkUnread.add(c.slug);
+          if (c.chapter.isNotEmpty) toMarkUnread.add(c.chapter);
+          continue;
+        }
         if (c.slug.isNotEmpty) {
           toMarkRead.add(c.slug);
           toMarkRead.add(SyncService.hashSlug(c.slug).toString());
@@ -556,7 +625,6 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         }
       }
 
-      final toMarkUnread = <String>[];
       if (!isCompleted && lastReadIndex >= 0) {
         for (int i = lastReadIndex + 1; i < chronoChapters.length; i++) {
           final c = chronoChapters[i];
@@ -571,15 +639,12 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
         }
       }
 
-      // Bersihkan juga slug dari feed items manga ini yang masih aktif/unread
-      for (final item in feedItems) {
-        if (item.mangaSlug == widget.slug &&
-            (widget.source.isEmpty || item.mangaSource == widget.source) &&
-            item.isNew) {
-          toMarkUnread.addAll(item.newChapterSlugs);
-          toMarkUnread.addAll(item.newChapters);
-        }
-      }
+      // Pastikan semua slug & title dari feed items unread masuk ke toMarkUnread
+      toMarkUnread.addAll(_feedUnreadSlugs);
+      toMarkUnread.addAll(_feedUnreadTitles);
+
+      // Jangan pernah biarkan slug yang unread masuk ke toMarkRead
+      toMarkRead.removeWhere((s) => toMarkUnread.contains(s));
 
       if (toMarkRead.isNotEmpty || toMarkUnread.isNotEmpty) {
         LocalStorage.setReadChaptersUpTo(
@@ -1003,8 +1068,9 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
   }
 
   List<Chapter> _getChronologicalChapters() {
-    if (_details == null || _details!.chapters.isEmpty) return [];
-    return Chapter.sortChronological(_details!.chapters);
+    if (_details == null || _details!.chapters.isEmpty) return const [];
+    _sortedChronoChapters ??= Chapter.sortChronological(_details!.chapters);
+    return _sortedChronoChapters!;
   }
 
   String _getMangaWebUrl(String source, String slug, {MangaDetails? details}) {
@@ -1457,6 +1523,11 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
     final cleanCChapter = c.chapter.trim().replaceAll(RegExp(r'^/+|/+$'), '');
 
     if (rawSlug.isNotEmpty) {
+      final cleanSlugCSlug = LocalStorage.cleanSlug(c.slug);
+      final cleanSlugRaw = LocalStorage.cleanSlug(rawSlug);
+      if (cleanSlugRaw.isNotEmpty && (cleanSlugCSlug == cleanSlugRaw || c.slug == cleanSlugRaw)) {
+        return true;
+      }
       if (c.slug == rawSlug ||
           c.chapter == rawSlug ||
           cleanCSlug == cleanLast ||
@@ -2035,10 +2106,6 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
           .toList();
     }
 
-    final lastReadChronoIndex = _cachedLastReadChronoIndex;
-    final hasNewerChapters = _cachedHasNewerChapters;
-    final isCompleted = _cachedIsCompleted;
-
     return ScaffoldMessenger(
       child: Scaffold(
         body: Stack(
@@ -2583,223 +2650,13 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
                                     // Hitung status pembacaan, jumlah bab, dan progres persis Kotatsu Redo
                                     Builder(
                                       builder: (context) {
-                                        final historyItem =
-                                            LocalStorage.getHistoryItem(
-                                              widget.slug,
-                                              source: widget.source,
-                                            );
-                                        final chronoChapters =
-                                            _getChronologicalChapters();
                                         final totalChapters =
-                                            chronoChapters.isNotEmpty
-                                            ? chronoChapters.length
-                                            : details.totalChapters;
+                                            _cachedChronoChapters?.isNotEmpty == true
+                                                ? _cachedChronoChapters!.length
+                                                : details.totalChapters;
 
-                                        int readChapterNumber = 0;
-                                        double progressPercent = 0.0;
-
-                                        if (historyItem != null &&
-                                            totalChapters > 0) {
-                                          // 1. Ambil persen progress total yang tersimpan (dari Reader atau Sync)
-                                          if (historyItem['percent'] != null) {
-                                            final p =
-                                                (historyItem['percent'] as num)
-                                                    .toDouble();
-                                            if (p > 0) {
-                                              progressPercent = p.clamp(
-                                                0.0,
-                                                1.0,
-                                              );
-                                            }
-                                          }
-
-                                          // 2. Cari bab berdasarkan slug di chronoChapters
-                                          final lastChapterSlug =
-                                              historyItem['chapterSlug']
-                                                  as String?;
-                                          if (lastChapterSlug != null &&
-                                              lastChapterSlug.isNotEmpty &&
-                                              chronoChapters.isNotEmpty) {
-                                            final cleanLast = lastChapterSlug
-                                                .trim()
-                                                .replaceAll(
-                                                  RegExp(r'^/+|/+$'),
-                                                  '',
-                                                );
-                                            final idx = chronoChapters
-                                                .indexWhere((c) {
-                                                  if (c.slug == lastChapterSlug) {
-                                                    return true;
-                                                  }
-                                                  final cleanC = c.slug
-                                                      .trim()
-                                                      .replaceAll(
-                                                        RegExp(r'^/+|/+$'),
-                                                        '',
-                                                      );
-                                                  if (cleanC == cleanLast) {
-                                                    return true;
-                                                  }
-                                                    if (SyncService.hashSlug(
-                                                              c.slug,
-                                                            ).toString() ==
-                                                            cleanLast ||
-                                                        SyncService.hashSlug(
-                                                              c.chapter,
-                                                            ).toString() ==
-                                                            cleanLast) {
-                                                      return true;
-                                                    }
-                                                  return false;
-                                                });
-                                            if (idx >= 0) {
-                                              readChapterNumber = idx + 1;
-                                            }
-                                          }
-
-                                          // 3. Cari berdasarkan chapterNumber jika tersimpan
-                                          if (readChapterNumber == 0 &&
-                                              historyItem['chapterNumber'] !=
-                                                  null) {
-                                            final chNumRaw =
-                                                (historyItem['chapterNumber']
-                                                        as num);
-                                            final chNum = chNumRaw.toInt();
-                                            if (chNum > 0) {
-                                              // Exact match angka asli (desimal 3.5 dst)
-                                              var idx = chronoChapters
-                                                  .indexWhere((c) =>
-                                                      c.chapterNumber ==
-                                                      chNumRaw);
-                                              if (idx == -1) {
-                                                idx = chronoChapters
-                                                    .indexWhere((c) =>
-                                                        c.chapterNumber
-                                                            ?.toInt() ==
-                                                        chNum);
-                                              }
-                                              if (idx >= 0) {
-                                                readChapterNumber = idx + 1;
-                                              } else {
-                                                for (int i = chronoChapters.length - 1; i >= 0; i--) {
-                                                  final cNum = chronoChapters[i].chapterNumber;
-                                                  if (cNum != null && cNum <= chNum) {
-                                                    readChapterNumber = i + 1;
-                                                    break;
-                                                  }
-                                                }
-                                                if (readChapterNumber == 0 && chNum <= totalChapters) {
-                                                  readChapterNumber = chNum;
-                                                }
-                                              }
-                                            }
-                                          }
-
-                                          // 4. Coba parse dari chapterTitle HANYA jika masuk akal (<= totalChapters & < 5000)
-                                          // Menghindari ID raksasa (misal 3414762387142711808) dianggap sebagai nomor bab
-                                          if (readChapterNumber == 0) {
-                                            final chTitle =
-                                                historyItem['chapterTitle']
-                                                    as String? ??
-                                                '';
-                                            if (chTitle.isNotEmpty) {
-                                              final match = RegExp(
-                                                r'(?:ch(?:apter)?\.?\s*|bab\s*|#\s*)(\d+(?:\.\d+)?)',
-                                                caseSensitive: false,
-                                              ).firstMatch(chTitle);
-                                              if (match != null) {
-                                                final parsed = double.tryParse(
-                                                  match.group(1) ?? '',
-                                                );
-                                                if (parsed != null &&
-                                                    parsed > 0 &&
-                                                    parsed <= totalChapters &&
-                                                    parsed < 5000) {
-                                                  readChapterNumber = parsed
-                                                      .toInt();
-                                                }
-                                              }
-                                            }
-                                          }
-
-                                          // 5. Jika nomor bab belum didapat tapi ada progressPercent (misal hasil sync server),
-                                          // turunkan readChapterNumber dari persentase
-                                          if (readChapterNumber == 0 &&
-                                              progressPercent > 0) {
-                                            final prevTotal =
-                                                (historyItem['totalChapters']
-                                                        as num?)
-                                                    ?.toInt();
-                                            if (prevTotal != null &&
-                                                prevTotal > 0 &&
-                                                prevTotal < totalChapters) {
-                                              readChapterNumber =
-                                                  (progressPercent * prevTotal)
-                                                      .round()
-                                                      .clamp(1, prevTotal);
-                                            } else {
-                                              readChapterNumber =
-                                                  (progressPercent *
-                                                          totalChapters)
-                                                      .round()
-                                                      .clamp(1, totalChapters);
-                                            }
-                                          }
-
-                                          // 6. Selalu sinkronkan progressPercent dengan posisi bab saat ini terhadap total bab terbaru
-                                          if (readChapterNumber > 0) {
-                                            final page =
-                                                (historyItem['page'] as num?)
-                                                    ?.toDouble() ??
-                                                0.0;
-                                            final totalPages =
-                                                (historyItem['totalPages']
-                                                        as num?)
-                                                    ?.toDouble() ??
-                                                0.0;
-                                            final pageFrac = (totalPages > 0)
-                                                ? (page / totalPages).clamp(
-                                                    0.0,
-                                                    1.0,
-                                                  )
-                                                : 0.0;
-                                            final isLastCh =
-                                                (readChapterNumber ==
-                                                totalChapters);
-                                            final savedPct =
-                                                (historyItem['percent'] as num?)
-                                                    ?.toDouble() ??
-                                                0.0;
-                                            final isAtLastPage =
-                                                totalPages <= 1 ||
-                                                page >= totalPages ||
-                                                pageFrac >= 1.0;
-                                            if (savedPct >= 0.999 ||
-                                                (isLastCh &&
-                                                    isAtLastPage)) {
-                                              progressPercent = 1.0;
-                                            } else {
-                                              final raw =
-                                                  (((readChapterNumber - 1) +
-                                                      pageFrac) /
-                                                  totalChapters);
-                                              final remaining =
-                                                  totalChapters -
-                                                  readChapterNumber;
-                                              if (remaining >= 2) {
-                                                progressPercent = raw.clamp(
-                                                  0.0,
-                                                  remaining >= 3 ? 0.97 : 0.98,
-                                                );
-                                              } else {
-                                                progressPercent = raw.clamp(
-                                                  0.0,
-                                                  0.99,
-                                                );
-                                              }
-                                            }
-                                          }
-                                        }
+                                        final readChapterNumber = _cachedReadChapterNumber;
+                                        final progressPercent = _cachedProgressPercent;
 
                                         String chaptersValue = '';
                                         if (readChapterNumber > 0 &&
@@ -3187,32 +3044,9 @@ class _MangaDetailsScreenState extends ConsumerState<MangaDetailsScreen> {
                                    final ch = displayChapters[index];
                                    final meta = _chapterMetaBySlug[ch.slug] ??
                                        _chapterMetaBySlug[ch.chapter] ??
-                                       (chIdx: -1, isExplicitlyRead: false);
-                                   final chIndex = meta.chIdx;
-                                   final isExplicitlyRead = meta.isExplicitlyRead;
-
-                                   final isLastRead =
-                                       !isCompleted &&
-                                       lastReadChronoIndex >= 0 &&
-                                       chIndex == lastReadChronoIndex;
-
-                                   final isPreviousOrCurrent =
-                                       !hasNewerChapters && isCompleted
-                                       ? true
-                                       : (lastReadChronoIndex >= 0 &&
-                                             chIndex >= 0 &&
-                                             chIndex <= lastReadChronoIndex);
-
-                                   final bool isBeyondLastRead =
-                                       lastReadChronoIndex >= 0 &&
-                                       chIndex > lastReadChronoIndex;
-
-                                   final isRead =
-                                       !isBeyondLastRead &&
-                                       (isCompleted ||
-                                           isPreviousOrCurrent ||
-                                           isExplicitlyRead ||
-                                           isLastRead);
+                                       (chIdx: -1, isRead: false, isLastRead: false);
+                                   final isRead = meta.isRead;
+                                   final isLastRead = meta.isLastRead;
 
                                   return ListTile(
                                     leading: CircleAvatar(

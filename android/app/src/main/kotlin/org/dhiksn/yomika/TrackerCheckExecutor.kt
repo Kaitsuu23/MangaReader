@@ -146,7 +146,7 @@ object TrackerCheckExecutor {
                     fun isChapterRead(ch: Chapter): Boolean {
                         val chIndex = sortedChapters.indexOf(ch)
                         if (isCompleted) {
-                            if (prevTotal <= 0 || (chIndex in 0 until prevTotal)) {
+                            if (prevTotal > 0 && (chIndex in 0 until prevTotal)) {
                                 return true
                             }
                         }
