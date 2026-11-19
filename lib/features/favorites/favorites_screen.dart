@@ -235,23 +235,6 @@ class FavoritesScreenState extends State<FavoritesScreen>
     return progress < 0.999;
   }
 
-  Widget _buildFilterChips(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          _buildChip(
-            label: 'Belum dibaca',
-            icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
-            selected: _filterUnread,
-            theme: theme,
-            onTap: () => setState(() => _filterUnread = !_filterUnread),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildChip({
     required String label,
     required IconData icon,
@@ -1701,7 +1684,6 @@ class FavoritesScreenState extends State<FavoritesScreen>
                     ],
                   ),
                 ),
-                _buildFilterChips(theme),
               ],
 
               // Kotatsu Category Tabs & Content
@@ -1796,92 +1778,80 @@ class FavoritesScreenState extends State<FavoritesScreen>
                               final rawItems = favsForCat(cat);
                               final items = _filterAndSortItems(rawItems);
 
-                              if (items.isEmpty) {
+                              if (rawItems.isEmpty) {
                                 return _buildEmptyState();
                               }
 
                               return Column(
                                 children: [
-                                  // Kotatsu Subheader Toolbar (Total items count & Sort selector & List mode selector)
+                                  // Subheader Toolbar (Filter chip on left, Sort + List mode on right)
                                   Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 16,
-                                      vertical: 8,
+                                      vertical: 6,
                                     ),
                                     child: Row(
                                       children: [
-                                        Text(
-                                          '${items.length} komik',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
-                                            color: theme
-                                                .colorScheme
-                                                .onSurfaceVariant,
+                                        _buildChip(
+                                          label: 'Belum dibaca',
+                                          icon: _filterUnread
+                                              ? Icons.close
+                                              : Icons.auto_stories_outlined,
+                                          selected: _filterUnread,
+                                          theme: theme,
+                                          onTap: () => setState(
+                                            () => _filterUnread = !_filterUnread,
                                           ),
                                         ),
                                         const Spacer(),
                                         // Sort Popup Menu
-                                        PopupMenuButton<String>(
-                                          tooltip: 'Urutkan',
-                                          offset: const Offset(0, 36),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                          ),
-                                          initialValue: _sortOrder,
-                                          onSelected: (val) {
-                                            setState(() {
-                                              _sortOrder = val;
-                                            });
-                                            LocalStorage.setFavoritesSort(
-                                              _sortOrder,
-                                            );
-                                            FeedUpdateNotifier.syncTrackedMangaConfig();
-                                          },
-                                          itemBuilder: (ctx) => [
-                                            _buildSortMenuItem(
-                                              'added_desc',
-                                              'Terbaru ditambahkan',
-                                            ),
-                                            _buildSortMenuItem(
-                                              'added_asc',
-                                              'Terlama ditambahkan',
-                                            ),
-                                            _buildSortMenuItem(
-                                              'title_asc',
-                                              'Berdasarkan nama (A - Z)',
-                                            ),
-                                            _buildSortMenuItem(
-                                              'title_desc',
-                                              'Berdasarkan nama (Z - A)',
-                                            ),
-                                          ],
-                                          child: Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 6,
-                                              vertical: 4,
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.swap_vert_rounded,
-                                                  size: 17,
-                                                  color:
-                                                      theme.colorScheme.primary,
+                                        SizedBox(
+                                          height: 34,
+                                          width: 34,
+                                          child: Material(
+                                            color: theme.colorScheme.surfaceContainerHigh,
+                                            borderRadius: BorderRadius.circular(8),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: PopupMenuButton<String>(
+                                              tooltip: 'Urutkan: ${_getSortLabel(_sortOrder)}',
+                                              offset: const Offset(0, 36),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(
+                                                  12,
                                                 ),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  _getSortLabel(_sortOrder),
-                                                  style: TextStyle(
-                                                    fontSize: 13,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: theme
-                                                        .colorScheme
-                                                        .primary,
-                                                  ),
+                                              ),
+                                              initialValue: _sortOrder,
+                                              padding: EdgeInsets.zero,
+                                              icon: Icon(
+                                                Icons.swap_vert_rounded,
+                                                size: 19,
+                                                color: theme.colorScheme.primary,
+                                              ),
+                                              onSelected: (val) {
+                                                setState(() {
+                                                  _sortOrder = val;
+                                                });
+                                                LocalStorage.setFavoritesSort(
+                                                  _sortOrder,
+                                                );
+                                                FeedUpdateNotifier.syncTrackedMangaConfig();
+                                              },
+                                              itemBuilder: (ctx) => [
+                                                _buildSortMenuItem(
+                                                  'added_desc',
+                                                  'Terbaru ditambahkan',
+                                                ),
+                                                _buildSortMenuItem(
+                                                  'added_asc',
+                                                  'Terlama ditambahkan',
+                                                ),
+                                                _buildSortMenuItem(
+                                                  'title_asc',
+                                                  'Berdasarkan nama (A - Z)',
+                                                ),
+                                                _buildSortMenuItem(
+                                                  'title_desc',
+                                                  'Berdasarkan nama (Z - A)',
                                                 ),
                                               ],
                                             ),
@@ -1889,28 +1859,31 @@ class FavoritesScreenState extends State<FavoritesScreen>
                                         ),
                                         const SizedBox(width: 8),
                                         // Opsi Daftar (List Mode Sheet)
-                                        Tooltip(
-                                          message: 'Opsi daftar',
-                                          child: InkWell(
-                                            onTap: _showListModeSheet,
-                                            borderRadius: BorderRadius.circular(
-                                              8,
-                                            ),
-                                            child: Padding(
-                                              padding: const EdgeInsets.all(4),
-                                              child: Icon(
-                                                _listMode == 'compact'
-                                                    ? Icons
-                                                          .format_list_bulleted_rounded
-                                                    : (_listMode == 'details'
-                                                          ? Icons
-                                                                .view_agenda_outlined
-                                                          : Icons
-                                                                .grid_view_rounded),
-                                                size: 18,
-                                                color: theme
-                                                    .colorScheme
-                                                    .onSurfaceVariant,
+                                        SizedBox(
+                                          height: 34,
+                                          width: 34,
+                                          child: Material(
+                                            color: theme.colorScheme.surfaceContainerHigh,
+                                            borderRadius: BorderRadius.circular(8),
+                                            clipBehavior: Clip.antiAlias,
+                                            child: Tooltip(
+                                              message: 'Opsi daftar',
+                                              child: InkWell(
+                                                onTap: _showListModeSheet,
+                                                child: Icon(
+                                                  _listMode == 'compact'
+                                                      ? Icons
+                                                            .format_list_bulleted_rounded
+                                                      : (_listMode == 'details'
+                                                            ? Icons
+                                                                  .view_agenda_outlined
+                                                            : Icons
+                                                                  .grid_view_rounded),
+                                                  size: 18,
+                                                  color: theme
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -1918,6 +1891,9 @@ class FavoritesScreenState extends State<FavoritesScreen>
                                       ],
                                     ),
                                   ),
+                                  if (items.isEmpty)
+                                    Expanded(child: _buildEmptyState())
+                                  else
 
                                   // Manga List / Grid based on _listMode
                                   Expanded(

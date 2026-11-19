@@ -173,151 +173,73 @@ class HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _buildSubheader(BuildContext context, int count, ThemeData theme) {
-    final canGroup = _sortOrder == 'last_read' ||
-        _sortOrder == 'long_ago_read' ||
-        _sortOrder == 'newest' ||
-        _sortOrder == 'oldest' ||
-        _sortOrder == 'progress' ||
-        _sortOrder == 'unread';
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildFilterChips(theme),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: Row(
-            children: [
-              Text(
-                '$count komik',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
-              const Spacer(),
-              if (canGroup)
-                IconButton(
-                  tooltip: _isGroupingEnabled ? 'Matikan pengelompokan' : 'Kelompokkan item',
-                  icon: Icon(
-                    _isGroupingEnabled ? Icons.workspaces_rounded : Icons.workspaces_outlined,
-                    size: 20,
-                    color: _isGroupingEnabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.all(4),
-                  constraints: const BoxConstraints(),
-                  onPressed: () {
-                    setState(() {
-                      _isGroupingEnabled = !_isGroupingEnabled;
-                    });
-                    LocalStorage.setHistoryGroupingEnabled(_isGroupingEnabled);
-                  },
-                ),
-              const SizedBox(width: 8),
-              PopupMenuButton<String>(
-            tooltip: 'Urutkan',
-            offset: const Offset(0, 36),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            initialValue: _sortOrder,
-            onSelected: (val) {
-              setState(() {
-                _sortOrder = val;
-              });
-              LocalStorage.setHistorySort(_sortOrder);
-            },
-            itemBuilder: (ctx) => [
-              _buildSortMenuItem('last_read', 'Terakhir dibaca'),
-              _buildSortMenuItem('long_ago_read', 'Sudah lama dibaca'),
-              _buildSortMenuItem('newest', 'Baru ditambahkan'),
-              _buildSortMenuItem('oldest', 'Paling lama ditambahkan'),
-              _buildSortMenuItem('progress', 'Progres tertinggi'),
-              _buildSortMenuItem('unread', 'Belum selesai dibaca'),
-              _buildSortMenuItem('title_asc', 'Berdasarkan nama (A - Z)'),
-              _buildSortMenuItem('title_desc', 'Berdasarkan nama (Z - A)'),
-            ],
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+  Widget _buildSubheader(BuildContext context, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, top: 4, bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    Icons.swap_vert_rounded,
-                    size: 17,
-                    color: theme.colorScheme.primary,
+                  _buildChip(
+                    label: 'Belum dibaca',
+                    icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
+                    selected: _filterUnread,
+                    theme: theme,
+                    onTap: () => setState(() => _filterUnread = !_filterUnread),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _getSortLabel(_sortOrder),
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.primary,
-                    ),
+                  const SizedBox(width: 8),
+                  _buildChip(
+                    label: 'Belum di favorit',
+                    icon: _filterNotFavorited ? Icons.close : Icons.favorite_border_rounded,
+                    selected: _filterNotFavorited,
+                    theme: theme,
+                    onTap: () => setState(() => _filterNotFavorited = !_filterNotFavorited),
                   ),
                 ],
               ),
             ),
           ),
-        ],
-      ),
-    ),
-      ],
-    );
-  }
-
-  Widget _buildFilterChips(ThemeData theme) {
-    if (!_filterUnread && !_filterNotFavorited) {
-      // Show chips in non-selected state
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        child: Row(
-          children: [
-            _buildChip(
-              label: 'Belum dibaca',
-              icon: Icons.auto_stories_outlined,
-              selected: false,
-              theme: theme,
-              onTap: () => setState(() => _filterUnread = true),
+          const SizedBox(width: 8),
+          SizedBox(
+            height: 34,
+            width: 34,
+            child: Material(
+              color: theme.colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(8),
+              clipBehavior: Clip.antiAlias,
+              child: PopupMenuButton<String>(
+                tooltip: 'Urutkan: ${_getSortLabel(_sortOrder)}',
+                offset: const Offset(0, 36),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                initialValue: _sortOrder,
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  Icons.swap_vert_rounded,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
+                onSelected: (val) {
+                  setState(() {
+                    _sortOrder = val;
+                  });
+                  LocalStorage.setHistorySort(_sortOrder);
+                },
+                itemBuilder: (ctx) => [
+                  _buildSortMenuItem('last_read', 'Terakhir dibaca'),
+                  _buildSortMenuItem('long_ago_read', 'Sudah lama dibaca'),
+                  _buildSortMenuItem('newest', 'Baru ditambahkan'),
+                  _buildSortMenuItem('oldest', 'Paling lama ditambahkan'),
+                  _buildSortMenuItem('progress', 'Progres tertinggi'),
+                  _buildSortMenuItem('unread', 'Belum selesai dibaca'),
+                  _buildSortMenuItem('title_asc', 'Berdasarkan nama (A - Z)'),
+                  _buildSortMenuItem('title_desc', 'Berdasarkan nama (Z - A)'),
+                ],
+              ),
             ),
-            const SizedBox(width: 8),
-            _buildChip(
-              label: 'Belum di favorit',
-              icon: Icons.favorite_border_rounded,
-              selected: false,
-              theme: theme,
-              onTap: () => setState(() => _filterNotFavorited = true),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          if (_filterUnread || !_filterNotFavorited) ...[
-            _buildChip(
-              label: 'Belum dibaca',
-              icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
-              selected: _filterUnread,
-              theme: theme,
-              onTap: () => setState(() => _filterUnread = !_filterUnread),
-            ),
-            const SizedBox(width: 8),
-          ],
-          if (_filterNotFavorited || !_filterUnread) ...[
-            _buildChip(
-              label: 'Belum di favorit',
-              icon: _filterNotFavorited ? Icons.close : Icons.favorite_border_rounded,
-              selected: _filterNotFavorited,
-              theme: theme,
-              onTap: () => setState(() => _filterNotFavorited = !_filterNotFavorited),
-            ),
-          ],
+          ),
         ],
       ),
     );
@@ -861,7 +783,7 @@ class HistoryScreenState extends State<HistoryScreen> {
                       ),
                     ),
                     if (all.isNotEmpty)
-                      _buildSubheader(context, filtered.length, theme),
+                      _buildSubheader(context, theme),
                   ],
                   Expanded(
                     child: _buildList(context, filtered, theme),

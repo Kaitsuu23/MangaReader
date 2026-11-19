@@ -49,12 +49,38 @@ class _FavoritesBySourceScreenState
     super.initState();
     _loadPreferences();
     _searchController.addListener(_onSearchChanged);
+    _initTabController();
   }
 
   void _loadPreferences() {
     _listMode = LocalStorage.getFavoritesListMode();
     _gridColumns = LocalStorage.getFavoritesGridColumns();
     _sortOrder = LocalStorage.getFavoritesSort();
+  }
+
+  List<String> _getTabs() {
+    final allFavs = LocalStorage.getFavorites();
+    final distinctSources = <String>{};
+    for (final item in allFavs) {
+      final src = (item['source'] as String? ?? '').trim();
+      if (src.isNotEmpty) {
+        distinctSources.add(src.toLowerCase());
+      }
+    }
+    final sortedSources = distinctSources.toList()..sort();
+    return ['all', ...sortedSources];
+  }
+
+  void _initTabController([int initialIndex = 0]) {
+    final count = _getTabs().length;
+    final validCount = count < 1 ? 1 : count;
+    _lastTabIndex = initialIndex.clamp(0, validCount - 1);
+    _tabController = TabController(
+      length: validCount,
+      vsync: this,
+      initialIndex: _lastTabIndex,
+    );
+    _tabController!.addListener(_onTabChanged);
   }
 
   void _onSearchChanged() {
@@ -227,23 +253,6 @@ class _FavoritesBySourceScreenState
     // Title-case fallback
     if (rawSource.length <= 1) return rawSource.toUpperCase();
     return rawSource[0].toUpperCase() + rawSource.substring(1);
-  }
-
-  Widget _buildFilterChips(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
-        children: [
-          _buildChip(
-            label: 'Belum dibaca',
-            icon: _filterUnread ? Icons.close : Icons.auto_stories_outlined,
-            selected: _filterUnread,
-            theme: theme,
-            onTap: () => setState(() => _filterUnread = !_filterUnread),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildChip({
@@ -916,7 +925,6 @@ class _FavoritesBySourceScreenState
       body: SafeArea(
         child: Column(
           children: [
-            _buildFilterChips(theme),
             Expanded(
               child: ListenableBuilder(
                 listenable: Listenable.merge([
@@ -927,6 +935,15 @@ class _FavoritesBySourceScreenState
                 ]),
                 builder: (context, _) {
                   final allFavs = LocalStorage.getFavorites();
+
+                  if (allFavs.isEmpty) {
+                    return const EmptyView(
+                      icon: Icons.favorite_border_rounded,
+                      title: 'Belum Ada Favorit',
+                      subtitle:
+                          'Tandai komik favorit Anda untuk melihatnya di sini.',
+                    );
+                  }
 
                   // Extract all distinct sources
                   final distinctSources = <String>{};
@@ -941,18 +958,7 @@ class _FavoritesBySourceScreenState
 
                   if (_tabController == null ||
                       _tabController!.length != tabs.length) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _ensureTabController(tabs.length);
-                    });
-                  }
-
-                  if (allFavs.isEmpty) {
-                    return const EmptyView(
-                      icon: Icons.favorite_border_rounded,
-                      title: 'Belum Ada Favorit',
-                      subtitle:
-                          'Tandai komik favorit Anda untuk melihatnya di sini.',
-                    );
+                    _ensureTabController(tabs.length);
                   }
 
                   List<Map<String, dynamic>> favsForSource(String src) {
@@ -964,10 +970,7 @@ class _FavoritesBySourceScreenState
                     }).toList();
                   }
 
-                  final tabCtrl = _tabController;
-                  if (tabCtrl == null || tabCtrl.length != tabs.length) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+                  final tabCtrl = _tabController!;
 
                   return Column(
                     children: [
@@ -1034,23 +1037,7 @@ class _FavoritesBySourceScreenState
                             final rawItems = favsForSource(srcKey);
                             final items = _filterAndSortItems(rawItems);
 
-                            if (items.isEmpty) {
-                              if (_searchQuery.isNotEmpty) {
-                                return const EmptyView(
-                                  icon: Icons.search_off_rounded,
-                                  title: 'Tidak Ditemukan',
-                                  subtitle:
-                                      'Tidak ada komik yang cocok dengan pencarian.',
-                                );
-                              }
-                              if (_filterUnread) {
-                                return const EmptyView(
-                                  icon: Icons.done_all_rounded,
-                                  title: 'Semua Sudah Dibaca',
-                                  subtitle:
-                                      'Tidak ada komik yang belum dibaca pada sumber ini.',
-                                );
-                              }
+                            if (rawItems.isEmpty) {
                               return const EmptyView(
                                 icon: Icons.collections_bookmark_outlined,
                                 title: 'Belum Ada Komik',
@@ -1064,17 +1051,19 @@ class _FavoritesBySourceScreenState
                                 Padding(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 16,
-                                    vertical: 8,
+                                    vertical: 6,
                                   ),
                                   child: Row(
                                     children: [
-                                      Text(
-                                        '${items.length} komik',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: theme
-                                              .colorScheme.onSurfaceVariant,
+                                      _buildChip(
+                                        label: 'Belum dibaca',
+                                        icon: _filterUnread
+                                            ? Icons.close
+                                            : Icons.auto_stories_outlined,
+                                        selected: _filterUnread,
+                                        theme: theme,
+                                        onTap: () => setState(
+                                          () => _filterUnread = !_filterUnread,
                                         ),
                                       ),
                                       const Spacer(),
@@ -1089,6 +1078,23 @@ class _FavoritesBySourceScreenState
                                     ],
                                   ),
                                 ),
+                                if (items.isEmpty)
+                                  Expanded(
+                                    child: _searchQuery.isNotEmpty
+                                        ? const EmptyView(
+                                            icon: Icons.search_off_rounded,
+                                            title: 'Tidak Ditemukan',
+                                            subtitle:
+                                                'Tidak ada komik yang cocok dengan pencarian.',
+                                          )
+                                        : const EmptyView(
+                                            icon: Icons.done_all_rounded,
+                                            title: 'Semua Sudah Dibaca',
+                                            subtitle:
+                                                'Tidak ada komik yang belum dibaca pada sumber ini.',
+                                          ),
+                                  )
+                                else
                                 Expanded(
                                   child: _listMode == 'compact'
                                       ? ListView.builder(
